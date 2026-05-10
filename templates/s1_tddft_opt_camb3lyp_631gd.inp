@@ -1,0 +1,35 @@
+#===============================================================================
+# @TYPE:       s1-tddft-opt
+# @FUNCTIONAL: CAM-B3LYP
+# @BASIS:      6-31G(d)
+# @SOLVENT:    CPCM(Methanol)
+# @ORCA:       6.1.0
+# @CHARGE:     1
+# @MULT:       1
+# @SYSTEM:     closed-shell organic chromophore
+# @VERIFIED:   PENDING
+#===============================================================================
+# CAM-B3LYP has native TD-DFT analytical gradient support in ORCA 6.1.
+# No PBE decoy, no LibXC Functional 106, no D3BJ workaround needed.
+# TDA is used for stability during excited-state geometry optimization.
+#===============================================================================
+
+! Opt CAM-B3LYP RIJCOSX 6-31G(d) CPCM(Methanol)
+! TightOpt
+! TightScf
+
+%maxcore 3072
+
+%pal
+   nprocs 16
+end
+
+%tddft
+  nroots 5
+  iroot 1
+  tda   true
+end
+
+* xyz 1 1
+  <INSERT S0 OPTIMIZED GEOMETRY HERE>
+*

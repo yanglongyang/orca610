@@ -1,0 +1,49 @@
+#===============================================================================
+# @TYPE:       esd-vg-ic
+# @FUNCTIONAL: CAM-B3LYP
+# @BASIS:      6-31G(d)
+# @SOLVENT:    CPCM(Methanol)
+# @ORCA:       6.1.0
+# @CHARGE:     1
+# @MULT:       1
+# @VERIFIED:   PENDING
+#===============================================================================
+# ESD(IC) — Internal Conversion Rate via Excited State Dynamics
+# Method: VG (Vertical Gradient, default) — S₁ Hessian ≈ S₀ Hessian
+#
+# KEY SYNTAX NOTES (ORCA 6.1):
+#   - ESD(IC) on main input line triggers IC rate mode
+#   - nacme true in %tddft enables nonadiabatic coupling matrix elements
+#   - etf true uses electron translation factor (recommended)
+#   - gshessian: S₀ Hessian from Opt+Freq
+#   - eshessian: S₁ Hessian (use S₀ Hessian for VG approximation)
+#   - usej true: Duschinsky rotation (recommended)
+#
+# DO NOT USE: do_ic (not a valid keyword), ic_method vg (not valid)
+#===============================================================================
+
+! CAM-B3LYP RIJCOSX 6-31G(d) CPCM(Methanol) ESD(IC) TightScf
+
+%maxcore 3072
+
+%pal
+   nprocs 16
+end
+
+%tddft
+  nroots 5
+  iroot 1
+  nacme true
+  etf   true
+  tda   true
+end
+
+%esd
+  gshessian "<MOL>.hess"
+  eshessian "<MOL>.hess"
+  usej true
+end
+
+* xyz 1 1
+  <INSERT S1 OPTIMIZED GEOMETRY HERE>
+*

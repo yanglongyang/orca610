@@ -1,0 +1,53 @@
+#===============================================================================
+# @TYPE:       s0-opt-freq
+# @FUNCTIONAL: B3LYP
+# @BASIS:      6-31G(d)
+# @SOLVENT:    CPCM(Methanol)
+# @DISPERSION: D3BJ
+# @ORCA:       6.1.0 (libXC 7.0.0)
+# @CHARGE:     1
+# @MULT:       1
+# @SYSTEM:     closed-shell organic chromophore (C22-C26)
+# @VERIFIED:   2026-05-08 — LSH-33, LSH-34 S₀ Opt+Freq, zero imag freq
+#===============================================================================
+# TEMPLATE: S₀ Ground State Geometry Optimization + Frequency Calculation
+# Dispersion   : D3BJ (Becke-Johnson damping)
+# Solvent      : CPCM (Methanol) — implicit solvent model
+# Aux Basis    : Auto (RIJCOSX uses def2/J automatically)
+#===============================================================================
+# ORCA VERSION : 6.1.0 (Release, libXC 7.0.0)
+# DATE TESTED  : 2026-05-08
+# STATUS       : VERIFIED — LSH-33, LSH-34 S₀ Opt+Freq passed with zero imag freq
+#===============================================================================
+# KEYWORDS EXPLAINED:
+#   Opt         Geometry optimization (minimization of S₀ PES)
+#   Freq        Numerical frequencies after optimization (check for imag modes)
+#   B3LYP       Hybrid GGA functional (20% HF exchange) — natively supported
+#   RIJCOSX     RI for Coulomb + COSX for exchange (speedup, minimal accuracy loss)
+#   6-31G(d)    Pople double-zeta + polarization on heavy atoms
+#   D3BJ        Grimme's D3 dispersion correction with Becke-Johnson damping
+#   CPCM(...)   Conductor-like Polarizable Continuum Model (solvent=MeOH)
+#   TightOpt    Tighter convergence criteria for optimization
+#   TightScf    Tighter SCF convergence (1e-8 Eh vs default 1e-6)
+#===============================================================================
+# POST-RUN CHECKS:
+#   1. grep "HURRAY" <out>              → optimization converged
+#   2. grep "imaginary perturbations"   → should be 0
+#   3. grep "FINAL SINGLE POINT ENERGY" → last line = S₀ energy
+#   4. Check <basename>.xyz exists      → optimized geometry
+#   5. Check <basename>.hess exists     → Hessian for later ESD-VG
+#===============================================================================
+
+! Opt Freq B3LYP RIJCOSX 6-31G(d) D3BJ CPCM(Methanol)
+! TightOpt
+! TightScf
+
+%maxcore 3072
+
+%pal
+   nprocs 16
+end
+
+* xyz 1 1
+  <INSERT S₀ INITIAL GEOMETRY HERE — charge=1, mult=1 for closed-shell organics>
+*

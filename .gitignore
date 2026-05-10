@@ -1,0 +1,57 @@
+# ORCA large binary/output files
+*.gbw
+*.gbw1
+*.out
+*.hess
+*.densities
+*.densitiesinfo
+*.opt
+*.engrad
+*.property.txt
+*.bibtex
+*.cpcm
+*.cpcm_corr
+*.smd
+*.smd.grd
+*.ges
+*.cis
+*.tmp
+*.tmp.*
+*.bas*
+*_trj.xyz
+*.hostnames
+*.lastcis
+*.lastint
+*.lastprop
+*.lastscf
+*.maininp.tmp
+*.numcalcinp.tmp
+*.SHARK*
+*.SQRTV*
+*.res.*
+*.citations*
+*.vdw*
+*.grid*
+
+# ORCA manual (large, copyrighted)
+manual/
+
+# ORCA binaries
+orca
+orca_*
+otool_*
+autoci_*
+lib/
+datasets/
+openCOSMORS/
+tddft4s/
+
+# PDFs
+*.pdf
+*.tar.xz
+
+# tsp output
+/tmp/ts-out.*
+
+# IDE
+.vscode/

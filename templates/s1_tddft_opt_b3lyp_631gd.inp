@@ -1,0 +1,116 @@
+#===============================================================================
+# @TYPE:       s1-tddft-opt
+# @FUNCTIONAL: B3LYP (via LibXC Functional 106)
+# @BASIS:      6-31G(d)
+# @SOLVENT:    CPCM(Methanol)
+# @ORCA:       6.1.0 (libXC 7.0.0)
+# @CHARGE:     1
+# @MULT:       1
+# @SYSTEM:     closed-shell organic chromophore (C22-C26)
+# @VERIFIED:   FAILED — see full failure log below. Use CAM-B3LYP instead.
+#===============================================================================
+# TEMPLATE STATUS: DEPRECATED — DO NOT USE FOR NEW CALCULATIONS
+# Recommended alternative: s1_tddft_opt_camb3lyp_631gd.inp
+#===============================================================================
+#
+# ===== COMPLETE FAILURE LOG (2026-05-08) =====
+#
+# 7 attempts were made to run B3LYP S₁ TD-DFT Opt with LSH-33 in ORCA 6.1.
+# All failed. Here is the full diagnostic chain:
+#
+# ATTEMPT 1: "! TD-DFT Opt B3LYP ..."
+#   → INPUT ERROR: UNRECOGNIZED KEYWORD "TD-DFT" in simple input line
+#
+# ATTEMPT 2: "! TDDFT Opt B3LYP ..." (no hyphen)
+#   → INPUT ERROR: UNRECOGNIZED KEYWORD "TDDFT" in simple input line
+#
+# ATTEMPT 3: "! Opt B3LYP ..." with %tddft block (native B3LYP)
+#   → WARNING: Third functional derivative of B88 not available natively
+#   → ORCA aborts silently after the warning
+#
+# ATTEMPT 4: "! Opt PBE ..." + %method Functional 106 (LibXC B3LYP via decoy)
+#   → Input accepted, SCF converges, TD-DFT runs
+#   → 8 optimization cycles completed
+#   → BUT: D3BJ parameters loaded are for PBE (s8=0.7875), not B3LYP (s8=1.9889)
+#   → Dispersion correction is WRONG for B3LYP
+#
+# ATTEMPT 5: %method Functional 106 + %scf UseLibXC true
+#   → "UseLibXC" is not recognized in %scf block → error
+#
+# ATTEMPT 6: %method Functional 106 + D3s6/s8/a1/a2 override
+#   → D3s6/s8/a1/a2 keywords cause ORCA CIS module to crash with SIGABRT
+#   → These keywords are NOT valid in ORCA 6.1 %method block
+#
+# ATTEMPT 7: "! Opt PBE ... CPCM(Methanol)" (no D3BJ) + %method Functional 106 + tda true
+#   → 1st optimization cycle: TD-DFT completes successfully
+#   → 2nd optimization cycle: CIS module crashes with SIGABRT in CPSCF_Calc_XC
+#   → TDA helped the first cycle but LibXC B3LYP is fundamentally unstable
+#
+# ROOT CAUSE: ORCA 6.1's LibXC interface for B3LYP (functional 106) has an
+# intermittent bug in the XC kernel evaluation (CPSCF_Calc_XC) during TD-DFT
+# gradient calculations. It crashes unpredictably — sometimes on the 1st cycle,
+# sometimes after several cycles. The ORCA 6.1 manual does NOT document any
+# "third functional derivative" restriction for B3LYP, suggesting this is a
+# bug, not a documented limitation.
+#
+# RESOLUTION: Switched to CAM-B3LYP for the entire cascade. CAM-B3LYP has
+# native analytical TD-DFT gradient support in ORCA 6.1 without any workarounds.
+#===============================================================================
+#
+# ===== ARCHIVED: Original workaround notes (kept for reference) =====
+#
+# The PBE decoy trick: "! Opt PBE ..." passes ORCA input validation
+# (PBE has native third derivatives). %method Functional 106 overrides
+# PBE with LibXC's B3LYP at runtime.
+#
+# D3BJ pitfall: PBE decoy loads PBE's D3BJ parameters. D3 override
+# keywords (D3s6/s8/a1/a2) are NOT valid in ORCA 6.1 %method block.
+#
+# TDA: tda true is needed for stability but does NOT fully resolve the
+# intermittent LibXC B3LYP crash.
+#
+#===============================================================================
+# KEYWORDS EXPLAINED:
+#   Opt              Geometry optimization (on the excited state PES)
+#   PBE              Decoy functional — overridden by %method Functional 106
+#   RIJCOSX          RI-J + COSX for computational efficiency
+#   6-31G(d)         Basis set (must match S₀ calculation)
+#   D3BJ             Dispersion correction
+#   CPCM(Methanol)   Solvent model (must match S₀)
+#   TightOpt/TightScf Tighter convergence for reliable excited state geometry
+#   nroots 5         Compute 5 lowest excited states
+#   iroot 1          Optimize geometry on the 1st excited state (S₁)
+#   Functional 106   LibXC functional ID for B3LYP
+#===============================================================================
+# POST-RUN CHECKS:
+#   1. grep "ORCA TERMINATED NORMALLY" <out>  → job finished
+#   2. grep "HURRAY" <out>                     → optimization converged
+#   3. grep "Root   1:" <out>                  → S₁ energy + oscillator strength
+#   4. Emission energy E_em = Root 1 energy (eV) × 8065.54 → cm⁻¹
+#   5. Oscillator strength f from Root 1 line
+#   6. Check <basename>_S1_Opt.xyz exists      → optimized S₁ geometry
+#===============================================================================
+
+! Opt PBE RIJCOSX 6-31G(d) CPCM(Methanol)
+! TightOpt
+! TightScf
+
+%maxcore 3072
+
+%pal
+   nprocs 16
+end
+
+%method
+  Functional 106
+end
+
+%tddft
+  nroots 5
+  iroot 1
+  tda   true
+end
+
+* xyz 1 1
+  <INSERT S₀ OPTIMIZED GEOMETRY HERE — from S₀ Opt .xyz file>
+*

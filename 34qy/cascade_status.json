@@ -1,0 +1,33 @@
+{
+  "phase": "complete",
+  "molecules": {
+    "LSH-33": {
+      "s0_energy": -978.51304355458,
+      "s0_xyz": "LSH-33.xyz",
+      "s0_imag_freq": 0.0,
+      "s0_hess": "LSH-33.hess",
+      "s1_energy_cm1": 19459.85,
+      "s1_f_osc": 1.739320241,
+      "s1_xyz": "LSH-33_S1_Opt.xyz",
+      "s1_converged": true,
+      "k_ic": 0.04954889,
+      "k_r": 439396805.1129041,
+      "phi_f": 0.9999999998872343,
+      "lambda_em": 513.8785756313641
+    },
+    "LSH-34": {
+      "s0_energy": -1283.654388067166,
+      "s0_xyz": "LSH-34.xyz",
+      "s0_imag_freq": 0.0,
+      "s0_hess": "LSH-34.hess",
+      "s1_energy_cm1": 20554.18,
+      "s1_f_osc": 1.695644333,
+      "s1_xyz": "LSH-34_S1_Opt.xyz",
+      "s1_converged": true,
+      "k_ic": 0.0864248,
+      "k_r": 477896049.9458501,
+      "phi_f": 0.9999999998191555,
+      "lambda_em": 486.51904381493205
+    }
+  }
+}
