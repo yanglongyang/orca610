@@ -55,3 +55,11 @@ tddft4s/
 
 # IDE
 .vscode/
+
+# Local project directories (keep your calculations out of the repo)
+34qy/
+LSH-*/
+*ENERGY*/
+
+# But keep the templates directory structure
+!templates/.gitkeep
