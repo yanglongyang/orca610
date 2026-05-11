@@ -247,6 +247,48 @@ Numerical frequency output grows with displacement count: ~2 MB per displacement
 
 ---
 
+## Principle 6: Email Notifications
+
+### Why Notify?
+Long calculations (hours to days) don't require constant monitoring. Email notifications let you know when a phase completes or the entire cascade finishes.
+
+### Configuration
+Set environment variables before running phase scripts or autopilot:
+```bash
+export SMTP_PASS="your-auth-code"      # Required — SMTP authorization code
+export EMAIL_TO="you@example.com"      # Default: same as SMTP_USER
+export SMTP_HOST="smtp.163.com"        # Default: smtp.163.com
+export SMTP_PORT="465"                 # Default: 465 (SSL)
+export SMTP_USER="you@example.com"     # Default: same as EMAIL_TO
+```
+
+### SMTP Providers
+| Provider | SMTP_HOST | PORT | Auth Method |
+|----------|-----------|:---:|-------------|
+| 163.com | smtp.163.com | 465 | Authorization code (not login password) |
+| QQ Mail | smtp.qq.com | 465 | Authorization code |
+| Gmail | smtp.gmail.com | 587 | App password |
+
+### Automatic Triggers
+- `phase3_esd.sh` calls `notify_summary "ESD(IC) Complete"` after both ESD jobs finish
+- `phase4_report.sh` calls `notify_summary "Cascade Complete"` after report generation
+- `notify_summary()` reads `cascade_status.json` and includes all key data in the email body
+
+### Email Format
+```
+Subject: [AutoORCA] ESD(IC) Complete — 05/11 15:30
+Body:
+  Phase: esd_done
+  MOL1:
+    s0_energy: -978.51
+    s1_energy_cm1: 19459.9
+    k_ic: 0.0495
+    ...
+  Working directory: /data/software/orca610/34qy
+```
+
+---
+
 ## Recipe: Setting Up a New Cascade
 
 Apply this methodology to any multi-step calculation:

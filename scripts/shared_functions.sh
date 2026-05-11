@@ -241,6 +241,61 @@ EOF
 }
 
 #--------------------------------------------------------------------
+# Send email notification via SMTP.
+# Set env vars: EMAIL_TO, EMAIL_FROM, SMTP_USER, SMTP_PASS, SMTP_HOST, SMTP_PORT
+# Example (163.com): SMTP_HOST=smtp.163.com SMTP_PORT=465
+#--------------------------------------------------------------------
+EMAIL_TO="${EMAIL_TO:-}"
+EMAIL_FROM="${EMAIL_FROM:-}"
+SMTP_USER="${SMTP_USER:-}"
+SMTP_PASS="${SMTP_PASS:-}"
+SMTP_HOST="${SMTP_HOST:-smtp.163.com}"
+SMTP_PORT="${SMTP_PORT:-465}"
+
+send_notification() {
+    local subject="$1"
+    local body="$2"
+    if [ -z "$SMTP_PASS" ]; then
+        log "Email not configured — set SMTP_PASS env var"
+        return 0
+    fi
+    python3 - "$subject" "$body" "$EMAIL_TO" "$EMAIL_FROM" "$SMTP_USER" "$SMTP_PASS" "$SMTP_HOST" "$SMTP_PORT" << 'PYEOF'
+import sys, smtplib
+from email.mime.text import MIMEText
+s, b, t, f, u, p, h, port = sys.argv[1:9]
+msg = MIMEText(b, 'plain', 'utf-8')
+msg['Subject'] = s; msg['From'] = f; msg['To'] = t
+try:
+    sv = smtplib.SMTP_SSL(h, int(port))
+    sv.login(u, p); sv.sendmail(f, [t], msg.as_string()); sv.quit()
+    print("Email sent:", s)
+except Exception as e:
+    print("Email failed:", e)
+PYEOF
+}
+
+notify_summary() {
+    local event="$1"
+    local subject="[AutoORCA] ${event} — $(date '+%m/%d %H:%M')"
+    local body=$(python3 -c "
+import json
+with open('cascade_status.json') as f:
+    d = json.load(f)
+lines = ['Phase: ' + d.get('phase','unknown'), '']
+for mol in d.get('molecules', {}):
+    m = d['molecules'][mol]
+    lines.append(f'{mol}:')
+    for k in ['s0_energy','s1_energy_cm1','s1_f_osc','k_ic','phi_f','lambda_em']:
+        v = m.get(k)
+        if v is not None: lines.append(f'  {k}: {v}')
+lines.append('')
+lines.append('Working directory: ' + '$(pwd)')
+print('\n'.join(lines))
+" 2>/dev/null)
+    send_notification "$subject" "${body:-No status data available}"
+}
+
+#--------------------------------------------------------------------
 # Diagnose why an ORCA job failed — extract error context from output
 #--------------------------------------------------------------------
 diagnose_error() {
