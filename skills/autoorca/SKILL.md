@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Automate ORCA quantum chemistry workflows with phased cascade design, template-based knowledge accumulation, manual-driven debugging, error pattern monitoring, and resource-aware job scheduling. Use when the user asks to run multi-step ORCA calculations, set up automated computational chemistry pipelines, debug ORCA errors, build reusable calculation templates, or manage long-running quantum chemistry jobs. Applies to any functional, basis set, or calculation type — not specific to any one chemistry problem.
-version: 2.0.0
+version: 2.1.0
 ---
 
 # AutoORCA — Methodology for Automated Computational Chemistry
@@ -13,7 +13,7 @@ This skill encodes the **process**, not specific conclusions. It applies to any 
 1. **Phase the work**: Break multi-step calculations into independent phases with review gates between them
 2. **Accumulate knowledge**: Every successful calculation becomes a curated, searchable template
 3. **Debug from the manual**: Never guess keywords — search the ORCA manual for correct syntax and working examples
-4. **Monitor proactively**: Detect crashes, stalls, and data extraction failures automatically
+4. **Monitor minimally**: Log only at job boundaries (start/done/error). The output file is the progress record — don't resurface it line-by-line.
 5. **Respect resources**: queue jobs serially, parallelize at the right level, budget memory and disk
 
 ---
@@ -157,66 +157,56 @@ grep -B10 -A20 "xyzfile" manual/orca_manual_kb/<relevant_file>.md
 
 ---
 
-## Principle 4: Proactive Monitoring
+## Principle 4: Minimal, Event-Driven Monitoring
 
-### What to Monitor
-Don't just wait for `ORCA TERMINATED NORMALLY` — watch for failures in real-time.
+### Philosophy: The Output File IS the Monitoring
+ORCA writes everything to `.out` files. Claude can read them on demand. The monitoring system's ONLY job is to answer three questions at process boundaries:
+1. **Is the job alive?** (process check — `kill -0`)
+2. **Did it crash?** (error pattern scan on output — infrequent)
+3. **Did it finish normally?** (grep for "ORCA TERMINATED NORMALLY")
 
-### Process + Output Monitoring Pattern
-```bash
-run_orca() {
-    /path/to/orca "$input" &    # Launch in background
-    local pid=$!
-    
-    while kill -0 "$pid" 2>/dev/null; do
-        sleep 180  # Check every 3 minutes
-        
-        # 1. Detect stalls (output not growing)
-        if [ "$current_size" -eq "$last_size" ]; then
-            stall_count=$((stall_count + 1))
-        fi
-        
-        # 2. Scan for error patterns in output
-        for pattern in "${ERROR_PATTERNS[@]}"; do
-            if grep -q "$pattern" "$outfile"; then
-                kill -9 "$pid"
-                diagnose_error "$outfile" "$pattern"
-                return 1
-            fi
-        done
-    done
-    
-    # 3. Process ended — verify normal termination
-    grep -q "ORCA TERMINATED NORMALLY" "$outfile" || { diagnose_error; return 1; }
-}
-```
+Do NOT log per-iteration progress lines, last-line tails, SCF convergence steps, or geometry cycles during execution. These produce hundreds of log lines per job with zero diagnostic value for Claude Code. The output file already contains all of this.
+
+### run_orca Contract
+- **Log ONLY**: job start, job completion (SUCCESS/ERROR), and confirmed stalls
+- **Silent during execution**: check process liveness every 5 min, scan for fatal errors every 10 min
+- **On failure**: dump error context to `/tmp/orca_diag_PID.txt` (not N separate log lines)
+- **On success**: return 0, let the phase script extract data
 
 ### Error Pattern Library
-Build the `ERROR_PATTERNS` array cumulatively — each new failure type enriches monitoring:
+Build the `ERROR_PATTERNS` array cumulatively — each new failure type enriches detection. Scan for these every 2nd check (10 min) to reduce I/O on large output files:
 ```bash
 ERROR_PATTERNS=(
-    "INPUT ERROR"                          # Invalid keyword in ! line
-    "UNRECOGNIZED OR DUPLICATED KEYWORD"   # Typo or unsupported keyword
-    "FATAL ERROR"                          # Generic module crash
-    "Unknown identifier in"                # Invalid keyword in %block
-    "expect a '\$', '!', '%'"              # Input file syntax error
-    "does not exist"                       # Missing file reference
-    "segmentation fault"                   # Memory corruption or bug
+    "INPUT ERROR"
+    "UNRECOGNIZED OR DUPLICATED KEYWORD"
+    "FATAL ERROR"
+    "segmentation fault"
+    "ORCA finished by error termination"
     # Add new patterns as discovered
 )
 ```
-After each new error type: add it to the patterns array. The monitoring system gets smarter every run.
 
-### Diagnosis on Failure
+### What NOT to Monitor
+- **Per-iteration progress**: Last SCF energy, current gradient, optimization cycle number — it's all in the `.out` file if needed
+- **Convergence plots**: Real-time matplotlib graphs of energy/gradient convergence — pure compute waste for Claude Code
+- **Full-file greps every check**: Scanning 100+ MB output files every few minutes for "Current Energy" patterns
+- **Email polling loops**: Polling `notify_orca.py` to send email on completion — use file-based completion checks instead
+
+### Diagnosis on Failure (write to file, not to log stream)
 ```bash
 diagnose_error() {
-    echo "=== Last 20 lines of output ==="
-    tail -20 "$outfile"
-    echo "=== Error context ==="
-    grep -i -B2 -A5 "error\|abort\|fatal" "$outfile" | tail -30
+    log "=== ERROR DIAGNOSIS: $basename ==="
+    {
+        echo "--- Last 20 lines ---"
+        tail -20 "$outfile"
+        echo ""
+        echo "--- Error/warning context ---"
+        grep -i -B2 -A5 "error\|abort\|fatal" "$outfile" | tail -30
+    } > "/tmp/orca_diag_$$.txt"
+    log "Full diagnosis saved to /tmp/orca_diag_$$.txt"
 }
 ```
-The goal: when something fails, the diagnosis should be in the log, not require re-running to reproduce.
+Write error details to a temp file, and log only a pointer to it. Claude reads the file when debugging — the details don't need to be in the conversation log.
 
 ---
 
@@ -298,7 +288,7 @@ Apply this methodology to any multi-step calculation:
 3. **Choose functional/basis**: Consult manual for method-specific limitations (gradient support, solvent compatibility)
 4. **Create templates**: Start empty — templates grow as calculations succeed
 5. **Write phase scripts**: One script per phase, all sourcing shared_functions.sh
-6. **Set up monitoring**: Initialize ERROR_PATTERNS, write diagnose_error()
+6. **Set up monitoring**: Initialize ERROR_PATTERNS with known failure signatures, write diagnose_error() that dumps to file
 7. **Budget resources**: Memory per job × concurrent jobs vs available RAM. Disk for output accumulation
 8. **Test one molecule first**: Run the full cascade on the simplest molecule before scaling up
 9. **Submit with tsp**: Single command, serial execution, auto-continuation

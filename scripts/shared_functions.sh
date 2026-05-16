@@ -38,16 +38,13 @@ job_running() {
 }
 
 #--------------------------------------------------------------------
-# Wait for a running ORCA job to complete, polling tail every 5 min
+# Wait for a running ORCA job to complete — silent polling
 #--------------------------------------------------------------------
 wait_for_job() {
     local basename=$1
-    local outfile="${basename}.out"
     if job_running "$basename"; then
         log "Waiting for running job: $basename ..."
         while job_running "$basename"; do
-            local last_line=$(tail -1 "$outfile" 2>/dev/null | head -c 120)
-            log "  [$basename] $last_line"
             sleep 300
         done
         sleep 5
@@ -128,37 +125,38 @@ run_orca() {
     # Launch ORCA in background so we can monitor it
     /home/yang/bin/myorca "$input" &
     local orca_pid=$!
-    local check_interval=180  # 3 minutes between checks
+    local check_interval=300  # 5 minutes between checks
     local stall_count=0
     local last_size=0
-    local max_stalls=5        # 5 * 3min = 15min of no output = stalled
+    local max_stalls=4        # 4 * 5min = 20min of no output = stalled
+    local check_num=0
+    local stall_reported=0
 
     while kill -0 "$orca_pid" 2>/dev/null; do
         sleep "$check_interval"
+        check_num=$((check_num + 1))
 
         # Check output growth (detect stalls)
         if [ -f "$outfile" ]; then
             local cur_size=$(wc -c < "$outfile" 2>/dev/null || echo 0)
-            if [ "$cur_size" -eq "$last_size" ]; then
+            if [ "$cur_size" -eq "$last_size" ] && [ "$cur_size" -gt 0 ]; then
                 stall_count=$((stall_count + 1))
-                if [ "$stall_count" -ge "$max_stalls" ]; then
+                if [ "$stall_count" -ge "$max_stalls" ] && [ "$stall_reported" -eq 0 ]; then
                     log "WARNING: Output stalled for $((stall_count * check_interval / 60)) min — possible hang"
+                    stall_reported=1
                 fi
             else
                 stall_count=0
                 last_size=$cur_size
-                # Show progress: last meaningful line
-                local last_line=$(grep -v "^\s*$" "$outfile" 2>/dev/null | tail -1 | head -c 130)
-                log "  [$basename] $last_line"
+                stall_reported=0
             fi
         fi
 
-        # Scan for error patterns
-        if [ -f "$outfile" ]; then
+        # Scan for fatal error patterns (every other check to reduce I/O)
+        if [ "$((check_num % 2))" -eq 0 ] && [ -f "$outfile" ]; then
             for pattern in "${ERROR_PATTERNS[@]}"; do
                 if grep -q "$pattern" "$outfile"; then
                     log "CRITICAL: Detected error pattern '$pattern' in $outfile"
-                    log "Killing ORCA process $orca_pid and aborting..."
                     kill -9 "$orca_pid" 2>/dev/null
                     wait "$orca_pid" 2>/dev/null
                     diagnose_error "$basename" "$outfile" "$pattern"
@@ -303,34 +301,24 @@ diagnose_error() {
     local outfile=$2
     local matched_pattern=$3
 
-    log "=============================================="
-    log "  ERROR DIAGNOSIS: $basename"
-    log "=============================================="
+    log "=== ERROR DIAGNOSIS: $basename ==="
+    [ -n "$matched_pattern" ] && log "Matched pattern: $matched_pattern"
 
-    if [ -n "$matched_pattern" ]; then
-        log "Matched pattern: $matched_pattern"
-    fi
+    # Dump error context as a single block to avoid N log lines
+    {
+        echo "--- Last 20 lines ---"
+        tail -20 "$outfile" 2>/dev/null
+        echo ""
+        echo "--- Error/warning context ---"
+        grep -i -B2 -A5 "error\|abort\|fatal\|WARNING\|cannot\|unable\|fail" "$outfile" 2>/dev/null | tail -30
+    } > "/tmp/orca_diag_$$.txt"
 
-    # Extract the last error/warning context
-    log "--- Last 20 lines of output ---"
-    tail -20 "$outfile" 2>/dev/null | while IFS= read -r line; do
-        log "  $line"
-    done
-
-    # Extract specific error messages
-    log "--- Error context ---"
-    grep -i -B2 -A5 "error\|abort\|fatal\|WARNING\|cannot\|unable\|fail" "$outfile" 2>/dev/null | tail -30 | while IFS= read -r line; do
-        log "  $line"
-    done
-
-    # Check if process is still alive
     if job_running "$basename"; then
-        log "STATUS: ORCA process for $basename is still running (zombie?)"
+        log "STATUS: process still alive (zombie?)"
     else
-        log "STATUS: ORCA process for $basename has exited (crashed or killed)"
+        log "STATUS: process exited (crashed/killed)"
     fi
-
-    log "=============================================="
+    log "Full diagnosis saved to /tmp/orca_diag_$$.txt"
 }
 
 #--------------------------------------------------------------------
@@ -384,10 +372,11 @@ get_k_ic() {
 # Write JSON status (simple key=value approach using python)
 #--------------------------------------------------------------------
 update_status() {
-    python3 - "$@" << 'PYEOF'
-import sys, json
+    python3 - "$STATUS_FILE" "$@" << 'PYEOF'
+import sys, json, os
 
-status_file = "/data/software/orca610/34qy/cascade_status.json"
+status_file = sys.argv[1]
+del sys.argv[1]
 with open(status_file) as f:
     data = json.load(f)
 
