@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Build a conservative ORCA 6.1 S1 dihedral-scan input and classify evidence."""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+
+class TictInputError(ValueError):
+    pass
+
+
+def classify_tict(evidence: dict) -> str:
+    """Return a conservative TICT label; geometry alone can never support TICT."""
+    if not evidence.get("geometry_compared"):
+        return "TICT_UNRESOLVED"
+    if not evidence.get("substantial_twist"):
+        return "TICT_NOT_SUPPORTED"
+    electronic = bool(evidence.get("ct_character_increases"))
+    oscillator = bool(evidence.get("oscillator_strength_reduces"))
+    energetic = bool(evidence.get("twisted_low_energy_region"))
+    solvent = bool(evidence.get("polar_state_solvent_stabilization"))
+    pathway = bool(evidence.get("plausible_fc_to_twisted_path"))
+    support_count = sum((electronic, oscillator, energetic, solvent, pathway))
+    if electronic and energetic and support_count >= 3:
+        return "TICT_SUPPORTED"
+    if support_count >= 1:
+        return "TICT_POSSIBLE"
+    return "TICT_UNRESOLVED"
+
+
+def build_input(config: dict) -> str:
+    required = ("xyz", "charge", "multiplicity", "dihedral", "range_deg", "method")
+    missing = [key for key in required if config.get(key) in (None, "")]
+    if missing:
+        raise TictInputError("missing fields: " + ", ".join(missing))
+    dihedral = config["dihedral"]
+    interval = config["range_deg"]
+    if len(dihedral) != 4 or len(interval) != 3:
+        raise TictInputError("dihedral needs four atoms and range_deg needs start, end, steps")
+    base = int(config.get("atom_index_base", 1))
+    if base not in (0, 1):
+        raise TictInputError("atom_index_base must be 0 or 1")
+    atoms = [int(atom) - base for atom in dihedral]
+    if min(atoms) < 0:
+        raise TictInputError("atom indices are invalid for atom_index_base")
+    method = config["method"]
+    for key in ("functional", "basis", "dispersion", "solvent", "nroots", "iroot", "tda"):
+        if method.get(key) in (None, ""):
+            raise TictInputError(f"method lacks {key}")
+    ntostates = method.get("nto_states", method["iroot"])
+    ntothresh = method.get("nto_threshold", "1e-4")
+    start, end, steps = interval
+    return "\n".join((
+        "# AutoORCA v3.1 TICT diagnostic: inspect state identity/NTOs at every scan point.",
+        f"! Opt {method['functional']} RIJCOSX {method['basis']} {method['dispersion']} {method['solvent']} TightScf",
+        "%geom",
+        "  Scan D " + " ".join(map(str, atoms)) + f" = {start}, {end}, {steps} end",
+        "end",
+        "%tddft",
+        f"  nroots {method['nroots']}",
+        f"  iroot {method['iroot']}",
+        f"  tda {str(method['tda']).lower()}",
+        f"  followiroot {str(method.get('followiroot', True)).lower()}",
+        "  donto true",
+        f"  ntostates {ntostates}",
+        f"  ntothresh {ntothresh}",
+        "end",
+        f"* xyzfile {config['charge']} {config['multiplicity']} {config['xyz']}",
+        "",
+    ))
+
+
+def main(config_path: str, output_path: str) -> None:
+    try:
+        output = build_input(json.loads(Path(config_path).read_text()))
+    except (OSError, json.JSONDecodeError, TictInputError) as exc:
+        print(f"[TICT] ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    Path(output_path).write_text(output)
+    print(f"Wrote {output_path}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print(f"Usage: {Path(sys.argv[0]).name} scan_config.json output.inp", file=sys.stderr)
+        raise SystemExit(2)
+    main(sys.argv[1], sys.argv[2])

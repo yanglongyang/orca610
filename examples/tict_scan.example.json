@@ -1,0 +1,20 @@
+{
+  "xyz": "probe_S1.xyz",
+  "charge": 0,
+  "multiplicity": 1,
+  "atom_index_base": 1,
+  "dihedral": [1, 2, 5, 6],
+  "range_deg": [0, 90, 10],
+  "method": {
+    "functional": "CAM-B3LYP",
+    "basis": "def2-SVPD",
+    "dispersion": "D3BJ",
+    "solvent": "CPCM(Water)",
+    "nroots": 5,
+    "iroot": 1,
+    "tda": false,
+    "followiroot": true,
+    "nto_states": "1,2,3",
+    "nto_threshold": "1e-4"
+  }
+}

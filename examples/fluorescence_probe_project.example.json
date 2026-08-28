@@ -1,0 +1,31 @@
+{
+  "project": "example_fluorescence_probe",
+  "species": [
+    {
+      "id": "probe",
+      "role": "intact_probe",
+      "xyz": "probe.xyz",
+      "charge": 0,
+      "multiplicity": 1,
+      "fragments": {
+        "donor": [1, 2, 3, 4],
+        "pi_bridge": [5, 6, 7, 8],
+        "acceptor": [9, 10, 11, 12]
+      },
+      "tict_dihedrals": [[1, 2, 5, 6]]
+    },
+    {
+      "id": "fluorophore",
+      "role": "released_fluorophore",
+      "xyz": "fluorophore.xyz",
+      "charge": 0,
+      "multiplicity": 1,
+      "fragments": {
+        "donor": [1, 2, 3, 4],
+        "pi_bridge": [5, 6, 7, 8],
+        "acceptor": [9, 10, 11, 12]
+      },
+      "tict_dihedrals": [[1, 2, 5, 6]]
+    }
+  ]
+}

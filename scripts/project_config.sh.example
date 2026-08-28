@@ -25,6 +25,10 @@ S1_TDA=false
 NROOTS=5
 IROOT=1
 FOLLOW_IROOT=true
+# ORCA 6.1 NTO controls. NTO states are explicit so state character can be
+# compared across R0/R1; do not treat ordinal roots as state identity.
+NTO_STATES="${NTO_STATES:-$IROOT}"
+NTO_THRESH="${NTO_THRESH:-1e-4}"
 
 # Final vertical-emission single point. Geometry may come from the S1 level above;
 # the reported energy is defined by THIS level.
@@ -38,3 +42,8 @@ EM_CPCMEQ=true
 # ESD(IC): ORCA 6.1 recommends full TD-DFT for NACME.
 IC_TDA=false
 ALLOW_MIXED_HESSIANS=false
+
+# Optional fluorescence-probe analysis. Leave empty when Multiwfn is absent;
+# the ORCA-only NTO workflow remains fully functional.
+MULTIWFN_BIN="${MULTIWFN_BIN:-}"
+SOLVENT_SERIES=()

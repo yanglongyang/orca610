@@ -1,8 +1,8 @@
-# AutoORCA 3.0 — Guarded ORCA Photophysics Workflows
+# AutoORCA 3.1 — Fluorescence Probe Analysis
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision adds scientific guardrails that were missing from the early version: method provenance, state-identity checks, consistent energy-cycle rules, corrected ESD(IC) setup, configurable resources, and explicit uncertainty in photophysical reporting.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.1 builds a fluorescence-probe analysis layer on them: controlled probe/product comparison, NTO/ICT evidence, solvent-series validation, conservative TICT diagnostics, and evidence-ranked reports.
 
 ## Repository layout
 
@@ -11,7 +11,13 @@ The 3.0 revision adds scientific guardrails that were missing from the early ver
 ├── README.md
 ├── skills/autoorca/SKILL.md
 ├── references/
-│   └── photophysics_consistency.md
+│   ├── photophysics_consistency.md
+│   ├── probe_pair_analysis.md
+│   ├── ict_nto_analysis.md
+│   ├── hole_electron_analysis.md
+│   ├── solvent_effects.md
+│   ├── tict_diagnostics.md
+│   └── fluorescence_probe_mechanism.md
 ├── scripts/
 │   ├── project_config.sh.example
 │   ├── shared_functions.sh
@@ -20,6 +26,10 @@ The 3.0 revision adds scientific guardrails that were missing from the early ver
 │   ├── phase3_esd.sh
 │   ├── phase4_report.sh
 │   ├── energy_cycle_guard.py       # refuses mixed-level E00/energy cycles
+│   ├── probe_pair_compare.py        # matched probe/product spectral comparison
+│   ├── solvent_series_report.py     # fixed-geometry vs solvent-relaxed gate
+│   ├── tict_scan_builder.py         # root-followed S1 dihedral scan input
+│   ├── fluorescence_probe_report.py # evidence-ranked Markdown + JSON report
 │   └── autopilot.sh
 └── templates/
     ├── s0_opt_freq_camb3lyp_631gd.inp
@@ -105,6 +115,31 @@ Phase 4  Report
          -> two-channel Phi_F clearly labeled when ISC/other knr are absent
          -> provenance + warnings retained
 ```
+
+## Fluorescence-probe analysis
+
+```text
+intact probe
+       |
+       | enzyme / analyte / chemical reaction
+       v
+released fluorophore
+
+AutoORCA v3.1:
+  S0/S1 -> absorption/emission -> NTO/state identity
+       -> controlled pair comparison -> solvent/TICT evidence
+       -> evidence-ranked mechanistic report
+```
+
+Start with a user-defined project/species file; atom fragments and TICT dihedrals are never guessed:
+
+```bash
+python3 scripts/probe_pair_compare.py examples/probe_pair_results.example.json
+python3 scripts/solvent_series_report.py examples/solvent_series.example.json
+python3 scripts/tict_scan_builder.py examples/tict_scan.example.json tict_scan.inp
+```
+
+The v3.1 layer is limited to singlet fluorescence photophysics. It does not add triplet, ISC, phosphorescence, or SOC workflows. A missing Multiwfn installation only records `NOT_RUN` for quantitative hole-electron analysis; ORCA-native NTO analysis still works.
 
 ## Important methodological rule: geometry level vs energy level
 

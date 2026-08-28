@@ -39,6 +39,8 @@ PYEOF
             echo "  tda ${S1_TDA}"
             echo "  followiroot ${FOLLOW_IROOT}"
             echo "  donto true"
+            echo "  ntostates ${NTO_STATES}"
+            echo "  ntothresh ${NTO_THRESH}"
             echo "end"
             echo "* xyz ${CHARGE} ${MULT}"
             tail -n +3 "$s0_xyz"
@@ -63,6 +65,10 @@ PYEOF
 
     final_root=$(get_final_iroot "$opt_out" "$IROOT")
     log "$mol: requested IROOT=$IROOT, final followed root=$final_root"
+    # The safe default NTO_STATES is IROOT.  If root following moves that state,
+    # request the NTO for the final root rather than silently analysing the old one.
+    em_nto_states="$NTO_STATES"
+    [ "$NTO_STATES" != "$IROOT" ] || em_nto_states="$final_root"
 
     # Separate SP avoids accidentally extracting a TD spectrum from a displaced
     # frequency sub-calculation. The solvent regime is explicit.
@@ -80,6 +86,8 @@ PYEOF
             echo "  tda ${EM_TDA}"
             echo "  cpcmeq ${EM_CPCMEQ}"
             echo "  donto true"
+            echo "  ntostates ${em_nto_states}"
+            echo "  ntothresh ${NTO_THRESH}"
             echo "end"
             echo "* xyz ${CHARGE} ${MULT}"
             tail -n +3 "$s1_xyz"

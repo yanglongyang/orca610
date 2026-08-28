@@ -1,0 +1,15 @@
+{
+  "protocol": "fixed_geometry",
+  "entries": [
+    {
+      "solvent": "Toluene", "epsilon": 2.38, "geometry_id": "probe_R0_fixed", "geometry_solvent": "gas_phase", "energy_solvent": "Toluene", "transition_eV": 3.20,
+      "functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent_regime": "non-equilibrium vertical", "cpcmeq": false,
+      "tda": false, "excited_state_method": "full TD-DFT", "state_identity": "same NTO character", "numerical_settings": {"nroots": 5}
+    },
+    {
+      "solvent": "Water", "epsilon": 78.4, "geometry_id": "probe_R0_fixed", "geometry_solvent": "gas_phase", "energy_solvent": "Water", "transition_eV": 2.98,
+      "functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent_regime": "non-equilibrium vertical", "cpcmeq": false,
+      "tda": false, "excited_state_method": "full TD-DFT", "state_identity": "same NTO character", "numerical_settings": {"nroots": 5}
+    }
+  ]
+}
