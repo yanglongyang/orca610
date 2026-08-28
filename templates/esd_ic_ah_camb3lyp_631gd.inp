@@ -1,5 +1,5 @@
 #===============================================================================
-# @TYPE:       s1-tddft-optfreq
+# @TYPE:       esd-ic-ah
 # @FUNCTIONAL: CAM-B3LYP
 # @BASIS:      6-31G(d)
 # @SOLVENT:    CPCM(Methanol)
@@ -8,26 +8,33 @@
 # @ORCA:       6.1.x
 # @CHARGE:     <CHARGE>
 # @MULT:       <MULT>
-# @SYSTEM:     example closed-shell organic chromophore
-# @STATUS:     PENDING — adapt and verify for the target state
+# @STATUS:     PENDING
 #===============================================================================
-# Root number is not state identity. Inspect NTO/configuration character.
-# FOLLOWIROOT improves homing across crossings but does not replace manual review.
+# ORCA 6.1 manual, Sec. 5.5.5:
+# - full TD-DFT is recommended for NACME
+# - provide ground- and excited-state Hessians
+# - input geometry must match the ground-state Hessian
 #===============================================================================
 
-! Opt Freq CAM-B3LYP RIJCOSX 6-31G(d) D3BJ CPCM(Methanol) TightOpt TightScf
+! CAM-B3LYP RIJCOSX 6-31G(d) D3BJ CPCM(Methanol) ESD(IC) TightScf
 
 %maxcore <MAXCORE_MB_PER_CORE>
 %pal nprocs <NPROCS> end
 
 %tddft
+  tda false
   nroots 5
   iroot 1
-  tda false
-  followiroot true
-  donto true
+  nacme true
+  etf true
+end
+
+%esd
+  gshessian "<S0_HESSIAN>"
+  eshessian "<S1_HESSIAN>"
+  usej true
 end
 
 * xyz <CHARGE> <MULT>
-  <INSERT S0 OPTIMIZED GEOMETRY>
+  <INSERT S0 GEOMETRY MATCHING GSHESSIAN>
 *

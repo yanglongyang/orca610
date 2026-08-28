@@ -1,94 +1,111 @@
-#!/bin/bash
-#==============================================================================
-# Phase 2: S1 TD-DFT Optimization
-#
-# Generates S1 input from S0 optimized geometry + template (if available).
-# Customize: MOLECULES, S1_FUNCTIONAL, S1_BASIS, S1_SOLVENT below.
-#==============================================================================
-source "$(dirname "$0")/shared_functions.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/shared_functions.sh"
+CONFIG="${AUTOORCA_CONFIG:-$WORKDIR/project_config.sh}"
+[ -f "$CONFIG" ] && source "$CONFIG" || source "$SCRIPT_DIR/project_config.sh.example"
 
-# ========================== CUSTOMIZE HERE ==========================
-MOLECULES=("MOL1" "MOL2")
-S1_FUNCTIONAL="CAM-B3LYP"                    # Must support TD-DFT gradients
-S1_BASIS="6-31G(d)"
-S1_SOLVENT="CPCM(Methanol)"
-# ====================================================================
+init_status "${MOLECULES[@]}"
+record_method "s1_optfreq" "$S1_FUNCTIONAL" "$S1_BASIS" "$S1_DISPERSION" "$S1_SOLVENT" "$S1_TDA" "$CHARGE" "$MULT" "S0 optimized geometry"
+record_method "vertical_emission" "$EM_FUNCTIONAL" "$EM_BASIS" "$EM_DISPERSION" "$EM_SOLVENT" "$EM_TDA" "$CHARGE" "$MULT" "S1 optimized geometry"
 
 log "=================================================="
-log "  PHASE 2: S1 TD-DFT Opt"
+log "  PHASE 2: S1 Opt+Freq + clean emission SP"
 log "=================================================="
 
 for mol in "${MOLECULES[@]}"; do
-    log "--- $mol S1 ---"
+    s0_xyz=$(python3 - "$STATUS_FILE" "$mol" <<'PYEOF'
+import json,sys
+with open(sys.argv[1]) as f:d=json.load(f)
+print(d["molecules"][sys.argv[2]].get("s0_xyz", ""))
+PYEOF
+)
+    [ -f "$s0_xyz" ] || { log "FATAL: missing S0 optimized geometry for $mol"; exit 1; }
 
-    xyz="${mol}.xyz"
-    s1_inp="${mol}_S1_Opt.inp"
-    s1_out="${mol}_S1_Opt.out"
+    opt_inp="${mol}_S1_OptFreq.inp"
+    opt_out="${mol}_S1_OptFreq.out"
+    s1_xyz="${mol}_S1_OptFreq.xyz"
+    s1_hess="${mol}_S1_OptFreq.hess"
 
-    # Generate input file if it doesn't exist
-    if [ ! -f "$s1_inp" ]; then
-        template="$TEMPLATE_DIR/s1_tddft_opt_${S1_FUNCTIONAL,,}_${S1_BASIS//[()]/}.inp"
-        # Note: template naming convention — lowercase functional, strip parens from basis
-        # e.g.: s1_tddft_opt_cam-b3lyp_6-31gd.inp
-        if [ -f "$template" ]; then
-            log "Generating $s1_inp from template + $xyz"
-            sed '/^\* xyz/q' "$template" > "$s1_inp"
-            tail -n +3 "$xyz" >> "$s1_inp"
-            echo "*" >> "$s1_inp"
-        else
-            log "No template found, generating inline"
-            {
-                echo "# ${mol} S1 TD-DFT Opt | ${S1_FUNCTIONAL}/${S1_BASIS} | ${S1_SOLVENT}"
-                echo "! Opt ${S1_FUNCTIONAL} RIJCOSX ${S1_BASIS} ${S1_SOLVENT}"
-                echo "! TightOpt TightScf"
-                echo ""
-                echo "%maxcore 3072"
-                echo "%pal nprocs 16 end"
-                echo ""
-                echo "%tddft"
-                echo "  nroots 5"
-                echo "  iroot 1"
-                echo "  tda   true"
-                echo "end"
-                echo ""
-                echo "* xyz 1 1"
-                tail -n +3 "$xyz"
-                echo "*"
-            } > "$s1_inp"
-        fi
+    if [ ! -f "$opt_inp" ]; then
+        {
+            echo "# ${mol} S1 Opt+Freq — state tracking enabled"
+            echo "! Opt Freq ${S1_FUNCTIONAL} RIJCOSX ${S1_BASIS} ${S1_DISPERSION} ${S1_SOLVENT} TightOpt TightScf"
+            echo "%maxcore ${MAXCORE}"
+            echo "%pal nprocs ${NPROCS} end"
+            echo "%tddft"
+            echo "  nroots ${NROOTS}"
+            echo "  iroot ${IROOT}"
+            echo "  tda ${S1_TDA}"
+            echo "  followiroot ${FOLLOW_IROOT}"
+            echo "  donto true"
+            echo "end"
+            echo "* xyz ${CHARGE} ${MULT}"
+            tail -n +3 "$s0_xyz"
+            echo "*"
+        } > "$opt_inp"
     fi
 
-    if orca_done "$s1_out"; then
-        log "$s1_out already completed."
-    else
-        run_orca "$s1_inp" || { log "FATAL: $mol S1 failed"; exit 1; }
+    run_orca "$opt_inp" || exit 1
+    check_opt_converged "$opt_out" || { log "FATAL: S1 optimization convergence not confirmed for $mol"; exit 1; }
+
+    set +e
+    s1_imag=$(get_imag_count "$opt_out")
+    imag_rc=$?
+    set -e
+    [ "$imag_rc" -ne 2 ] || { log "FATAL: S1 frequency summary missing"; exit 1; }
+    if [ "$imag_rc" -eq 1 ]; then
+        log "FATAL: $mol S1 has $s1_imag imaginary frequencies; do not use as an S1 minimum without review"
+        exit 1
     fi
+    [ -f "$s1_xyz" ] || { log "FATAL: $s1_xyz missing"; exit 1; }
+    [ -f "$s1_hess" ] || { log "FATAL: $s1_hess missing"; exit 1; }
 
-    # Check convergence
-    if grep -q "ORCA TERMINATED NORMALLY" "$s1_out"; then
-        s1_conv=true
-    else
-        s1_conv=false
+    final_root=$(get_final_iroot "$opt_out" "$IROOT")
+    log "$mol: requested IROOT=$IROOT, final followed root=$final_root"
+
+    # Separate SP avoids accidentally extracting a TD spectrum from a displaced
+    # frequency sub-calculation. The solvent regime is explicit.
+    em_inp="${mol}_S1_Emission.inp"
+    em_out="${mol}_S1_Emission.out"
+    if [ ! -f "$em_inp" ]; then
+        {
+            echo "# ${mol} vertical emission at optimized S1 geometry"
+            echo "! ${EM_FUNCTIONAL} RIJCOSX ${EM_BASIS} ${EM_DISPERSION} ${EM_SOLVENT} TightScf"
+            echo "%maxcore ${MAXCORE}"
+            echo "%pal nprocs ${NPROCS} end"
+            echo "%tddft"
+            echo "  nroots ${NROOTS}"
+            echo "  iroot ${final_root}"
+            echo "  tda ${EM_TDA}"
+            echo "  cpcmeq ${EM_CPCMEQ}"
+            echo "  donto true"
+            echo "end"
+            echo "* xyz ${CHARGE} ${MULT}"
+            tail -n +3 "$s1_xyz"
+            echo "*"
+        } > "$em_inp"
     fi
+    run_orca "$em_inp" || exit 1
 
-    # Extract emission data
-    read e_em f_osc <<< $(get_tddft_emission "$s1_out")
-    log "$mol: E_em = $e_em cm-1, f = $f_osc"
-
-    lambda_em=$(python3 -c "print(f'{1e7/$e_em:.1f}')" 2>/dev/null || echo "0")
-    s1_xyz_file="${mol}_S1_Opt.xyz"
+    read -r e_em f_osc <<< "$(get_tddft_emission "$em_out" "$final_root")"
+    [ "$e_em" != "0" ] || { log "FATAL: failed to extract target-state emission energy; inspect state identity manually"; exit 1; }
+    lambda_em=$(python3 -c "print(f'{1e7/float(\"$e_em\"):.1f}')")
 
     update_status --phase "s1_running" \
         --mol "$mol" s1_energy_cm1 "$e_em" \
         --mol "$mol" s1_f_osc "$f_osc" \
-        --mol "$mol" s1_xyz "$s1_xyz_file" \
-        --mol "$mol" s1_converged "$s1_conv" \
-        --mol "$mol" lambda_em "$lambda_em"
+        --mol "$mol" lambda_em "$lambda_em" \
+        --mol "$mol" s1_xyz "$s1_xyz" \
+        --mol "$mol" s1_hess "$s1_hess" \
+        --mol "$mol" s1_imag_freq "$s1_imag" \
+        --mol "$mol" s1_final_root "$final_root" \
+        --mol "$mol" s1_converged true \
+        --mol "$mol" state_identity_checked false
 
-    # Save verified template on success
-    save_template "$s1_inp" "s1-tddft-opt" "S1 TD-DFT Opt passed"
+    update_status --warn "$mol: root following cannot prove chemical state identity; compare NTOs/configurations before final interpretation."
+    save_template "$opt_inp" "s1-tddft-optfreq" "$S1_FUNCTIONAL" "$S1_BASIS" "$S1_SOLVENT" "$S1_DISPERSION" "$CHARGE" "$MULT" "$S1_TDA" "S1 optimization converged; zero imaginary frequencies"
 done
 
 update_status --phase "s1_done"
 print_status
-log "Phase 2 finished. Review above, then run phase3_esd.sh."

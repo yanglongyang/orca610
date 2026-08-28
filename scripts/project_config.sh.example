@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Copy to project_config.sh inside the project/script directory and edit.
+
+MOLECULES=("MOL1" "MOL2")
+CHARGE=0
+MULT=1
+
+# Machine settings
+NPROCS="${ORCA_NPROCS:-8}"
+MAXCORE="${ORCA_MAXCORE:-3000}"   # MB per processing core
+
+# S0 geometry/Hessian level
+S0_FUNCTIONAL="CAM-B3LYP"
+S0_BASIS="def2-SVP"
+S0_DISPERSION="D3BJ"
+S0_SOLVENT="CPCM(Water)"
+
+# S1 geometry/Hessian level. Keep identical to S0 for an AH ESD(IC) workflow
+# unless a mixed-Hessian approximation is deliberate and documented.
+S1_FUNCTIONAL="CAM-B3LYP"
+S1_BASIS="def2-SVP"
+S1_DISPERSION="D3BJ"
+S1_SOLVENT="CPCM(Water)"
+S1_TDA=false
+NROOTS=5
+IROOT=1
+FOLLOW_IROOT=true
+
+# Final vertical-emission single point. Geometry may come from the S1 level above;
+# the reported energy is defined by THIS level.
+EM_FUNCTIONAL="CAM-B3LYP"
+EM_BASIS="def2-SVPD"
+EM_DISPERSION="D3BJ"
+EM_SOLVENT="CPCM(Water)"
+EM_TDA=false
+EM_CPCMEQ=true
+
+# ESD(IC): ORCA 6.1 recommends full TD-DFT for NACME.
+IC_TDA=false
+ALLOW_MIXED_HESSIANS=false

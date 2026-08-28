@@ -4,27 +4,22 @@
 # @BASIS:      6-31G(d)
 # @SOLVENT:    CPCM(Methanol)
 # @DISPERSION: D3BJ
-# @ORCA:       6.1.0
-# @CHARGE:     1
-# @MULT:       1
-# @SYSTEM:     closed-shell organic chromophore
-# @VERIFIED:   PENDING
+# @TDA:        n.a.
+# @ORCA:       6.1.x
+# @CHARGE:     <CHARGE>
+# @MULT:       <MULT>
+# @SYSTEM:     example closed-shell organic chromophore
+# @STATUS:     PENDING — adapt and verify for the target system
 #===============================================================================
-# CAM-B3LYP is a range-separated hybrid functional (65% HF at long range,
-# 19% at short range). Native TD-DFT gradient support in ORCA 6.1.
-# No LibXC workaround needed.
+# A working input syntax is not a universal method recommendation.
+# Replace placeholders and verify the minimum with frequencies.
 #===============================================================================
 
-! Opt Freq CAM-B3LYP RIJCOSX 6-31G(d) D3BJ CPCM(Methanol)
-! TightOpt
-! TightScf
+! Opt Freq CAM-B3LYP RIJCOSX 6-31G(d) D3BJ CPCM(Methanol) TightOpt TightScf
 
-%maxcore 3072
+%maxcore <MAXCORE_MB_PER_CORE>
+%pal nprocs <NPROCS> end
 
-%pal
-   nprocs 16
-end
-
-* xyz 1 1
-  <INSERT S0 INITIAL GEOMETRY HERE>
+* xyz <CHARGE> <MULT>
+  <INSERT INITIAL GEOMETRY>
 *

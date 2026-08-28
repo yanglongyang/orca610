@@ -1,106 +1,216 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #==============================================================================
-# shared_functions.sh — sourced by all phase scripts
+# shared_functions.sh — common helpers for AutoORCA 3.x
 #==============================================================================
-# This file lives in $ORCA_ROOT/scripts/ and is sourced by project-specific
-# phase scripts. It auto-detects the project working directory from the
-# calling script's location.
 
-# ---- Project root (shared resources) ----
-ORCA_ROOT="/data/software/orca610"
-export PATH=$ORCA_ROOT:$PATH
-export LD_LIBRARY_PATH=$ORCA_ROOT:$LD_LIBRARY_PATH
+# Do not hard-code one installation. Override with environment variables.
+ORCA_ROOT="${ORCA_ROOT:-/data/software/orca610}"
+MYORCA="${MYORCA:-$HOME/bin/myorca}"
+TEMPLATE_DIR="${TEMPLATE_DIR:-$ORCA_ROOT/templates}"
+MANUAL_DIR="${MANUAL_DIR:-$ORCA_ROOT/manual/orca_manual_kb}"
 
-# ---- Shared paths (project-level, NOT per-task) ----
-TEMPLATE_DIR="$ORCA_ROOT/templates"
-MANUAL_DIR="$ORCA_ROOT/manual/orca_manual_kb"
+export PATH="$ORCA_ROOT:$PATH"
+export LD_LIBRARY_PATH="$ORCA_ROOT:${LD_LIBRARY_PATH:-}"
 
-# ---- Working directory (auto-detected from calling script's location) ----
-# If the calling script is in a project subdirectory, use that as WORKDIR.
-# Otherwise fall back to current directory.
-if [ -n "${BASH_SOURCE[1]}" ]; then
-    WORKDIR=$(dirname "$(realpath "${BASH_SOURCE[1]}")")
-else
-    WORKDIR="$PWD"
-fi
-STATUS_FILE="$WORKDIR/cascade_status.json"
-
-cd "$WORKDIR"
+WORKDIR="${AUTOORCA_WORKDIR:-$PWD}"
+WORKDIR="$(realpath "$WORKDIR")"
+STATUS_FILE="${STATUS_FILE:-$WORKDIR/cascade_status.json}"
+cd "$WORKDIR" || exit 1
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 
-#--------------------------------------------------------------------
-# Check if an ORCA job is currently running for a given basename
-#--------------------------------------------------------------------
+slugify() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g'
+}
+
+#------------------------------------------------------------------------------
+# Status/provenance
+#------------------------------------------------------------------------------
+init_status() {
+    python3 - "$STATUS_FILE" "$@" <<'PYEOF'
+import json, os, sys
+path = sys.argv[1]
+mols = sys.argv[2:]
+if os.path.exists(path):
+    with open(path) as f:
+        data = json.load(f)
+else:
+    data = {"schema_version": 2, "phase": "initialized", "molecules": {}, "methods": {}, "warnings": []}
+data.setdefault("molecules", {})
+data.setdefault("methods", {})
+data.setdefault("warnings", [])
+for mol in mols:
+    data["molecules"].setdefault(mol, {})
+with open(path, "w") as f:
+    json.dump(data, f, indent=2)
+PYEOF
+}
+
+update_status() {
+    python3 - "$STATUS_FILE" "$@" <<'PYEOF'
+import sys, json, os
+status_file = sys.argv[1]
+args = sys.argv[2:]
+if os.path.exists(status_file):
+    with open(status_file) as f:
+        data = json.load(f)
+else:
+    data = {"schema_version": 2, "phase": "initialized", "molecules": {}, "methods": {}, "warnings": []}
+data.setdefault("molecules", {})
+data.setdefault("methods", {})
+data.setdefault("warnings", [])
+
+def coerce(v):
+    if v == "null": return None
+    if v == "true": return True
+    if v == "false": return False
+    try: return float(v)
+    except ValueError: return v
+
+i = 0
+while i < len(args):
+    if args[i] == "--phase":
+        data["phase"] = args[i+1]; i += 2
+    elif args[i] == "--mol":
+        mol, key, val = args[i+1:i+4]
+        data["molecules"].setdefault(mol, {})[key] = coerce(val)
+        i += 4
+    elif args[i] == "--warn":
+        data["warnings"].append(args[i+1]); i += 2
+    else:
+        i += 1
+with open(status_file, "w") as f:
+    json.dump(data, f, indent=2)
+PYEOF
+}
+
+record_method() {
+    local label="$1" functional="$2" basis="$3" dispersion="$4" solvent="$5"
+    local tda="$6" charge="$7" mult="$8" geometry_source="$9"
+    python3 - "$STATUS_FILE" "$label" "$functional" "$basis" "$dispersion" "$solvent" "$tda" "$charge" "$mult" "$geometry_source" <<'PYEOF'
+import json, os, sys
+(path, label, functional, basis, dispersion, solvent, tda, charge, mult, geometry_source) = sys.argv[1:]
+with open(path) as f:
+    d = json.load(f)
+d.setdefault("methods", {})[label] = {
+    "functional": functional,
+    "basis": basis,
+    "dispersion": dispersion,
+    "solvent": solvent,
+    "tda": None if tda == "n.a." else (tda.lower() == "true"),
+    "charge": int(charge),
+    "multiplicity": int(mult),
+    "geometry_source": geometry_source,
+    "orca_version": os.environ.get("ORCA_VERSION", "6.1.x (set ORCA_VERSION for exact build)")
+}
+with open(path, "w") as f:
+    json.dump(d, f, indent=2)
+PYEOF
+}
+
+check_hessian_method_compatibility() {
+    # ESD AH calculations should normally use GS/ES Hessians from compatible PES levels.
+    # Returns nonzero on mismatch unless ALLOW_MIXED_HESSIANS=true.
+    python3 - "$STATUS_FILE" "${ALLOW_MIXED_HESSIANS:-false}" <<'PYEOF'
+import json, sys
+path, allow = sys.argv[1], sys.argv[2].lower() == "true"
+with open(path) as f:
+    d = json.load(f)
+a = d.get("methods", {}).get("s0_optfreq")
+b = d.get("methods", {}).get("s1_optfreq")
+if not a or not b:
+    print("[METHOD-GATE] Missing s0_optfreq or s1_optfreq provenance.")
+    sys.exit(1)
+fields = ["functional", "basis", "dispersion", "solvent", "charge", "multiplicity"]
+diff = [(k, a.get(k), b.get(k)) for k in fields if a.get(k) != b.get(k)]
+if diff:
+    print("[METHOD-GATE] GS/ES Hessian levels differ:")
+    for k, x, y in diff:
+        print(f"  {k}: S0={x!r}  S1={y!r}")
+    if not allow:
+        print("[METHOD-GATE] STOP. Set ALLOW_MIXED_HESSIANS=true only for a deliberate, documented approximation.")
+        sys.exit(1)
+    print("[METHOD-GATE] WARNING: continuing with explicitly allowed mixed Hessians.")
+PYEOF
+}
+
+print_status() {
+    python3 - "$STATUS_FILE" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f:
+    d = json.load(f)
+print("\n" + "="*68)
+print(f"CASCADE STATUS — Phase: {d.get('phase','unknown')}")
+print("="*68)
+for mol, m in d.get("molecules", {}).items():
+    print(f"\n{mol}:")
+    for key in ["s0_energy", "s0_imag_freq", "s1_energy_cm1", "lambda_em", "s1_f_osc", "s1_converged", "s1_imag_freq", "k_ic", "k_r_approx", "phi_f_two_channel"]:
+        if key in m:
+            print(f"  {key}: {m[key]}")
+if d.get("methods"):
+    print("\nMethod provenance:")
+    for label, meta in d["methods"].items():
+        print(f"  {label}: {meta}")
+if d.get("warnings"):
+    print("\nWarnings:")
+    for w in d["warnings"]:
+        print("  -", w)
+print("="*68 + "\n")
+PYEOF
+}
+
+#------------------------------------------------------------------------------
+# ORCA process helpers
+#------------------------------------------------------------------------------
 job_running() {
     local basename=$1
     ps aux | grep -v grep | grep -q "orca.*${basename}"
 }
 
-#--------------------------------------------------------------------
-# Wait for a running ORCA job to complete — silent polling
-#--------------------------------------------------------------------
 wait_for_job() {
     local basename=$1
     if job_running "$basename"; then
         log "Waiting for running job: $basename ..."
-        while job_running "$basename"; do
-            sleep 300
-        done
+        while job_running "$basename"; do sleep 300; done
         sleep 5
         log "$basename finished."
     fi
 }
 
-#--------------------------------------------------------------------
-# Check if output file indicates normal termination
-#--------------------------------------------------------------------
 orca_done() {
     local outfile=$1
     [ -f "$outfile" ] && grep -q "ORCA TERMINATED NORMALLY" "$outfile"
 }
 
-#--------------------------------------------------------------------
-# Count imaginary frequencies. Returns 0 if none, 1 if any found.
-#--------------------------------------------------------------------
-check_imag() {
+check_opt_converged() {
     local outfile=$1
-    local n=$(grep "Total number of imaginary perturbations" "$outfile" | tail -1 | awk '{print $NF}')
-    if [ -n "$n" ] && [ "$n" -gt 0 ]; then
-        log "WARNING: $n imaginary frequencies found"
-        return 1
-    fi
-    return 0
+    grep -Eq "HURRAY|THE OPTIMIZATION HAS CONVERGED" "$outfile"
 }
 
-#--------------------------------------------------------------------
-# Extract final S0 energy (Hartree)
-#--------------------------------------------------------------------
+# Print count to stdout. Return 0=no imaginary, 1=imaginary present, 2=summary absent.
+get_imag_count() {
+    local outfile=$1 n
+    n=$(grep "Total number of imaginary perturbations" "$outfile" | tail -1 | awk '{print $NF}')
+    if [ -z "$n" ]; then
+        echo "NA"; return 2
+    fi
+    echo "$n"
+    [ "$n" -eq 0 ] && return 0 || return 1
+}
+
 get_s0_energy() {
     local outfile=$1
     grep "FINAL SINGLE POINT ENERGY" "$outfile" | tail -1 | awk '{print $NF}'
 }
 
-#--------------------------------------------------------------------
-# Get number of atoms from .xyz file
-#--------------------------------------------------------------------
-get_natom() {
-    head -1 "$1"
-}
+get_natom() { head -1 "$1"; }
 
-#--------------------------------------------------------------------
-# Run ORCA via myorca, with background process+output monitoring.
-# Detects crashes (process gone but no normal termination) and
-# common error patterns (INPUT ERROR, functional derivative, etc.)
-#--------------------------------------------------------------------
 ERROR_PATTERNS=(
     "INPUT ERROR"
     "UNRECOGNIZED OR DUPLICATED KEYWORD"
-    "Third functional derivative of a B88"
     "FATAL ERROR"
     "segmentation fault"
     "ORCA finished with error"
-    "abort"
 )
 
 run_orca() {
@@ -108,57 +218,53 @@ run_orca() {
     local basename="${input%.inp}"
     local outfile="${basename}.out"
 
+    if [ ! -x "$MYORCA" ]; then
+        log "ERROR: MYORCA wrapper is not executable: $MYORCA"
+        return 1
+    fi
+
     wait_for_job "$basename"
     if orca_done "$outfile"; then
         log "Already completed: $basename — skipping"
         return 0
     fi
 
-    # Remove any stale failed output so we get a fresh run
-    if [ -f "$outfile" ] && ! grep -q "ORCA TERMINATED NORMALLY" "$outfile"; then
+    if [ -f "$outfile" ]; then
         log "Removing stale/failed output: $outfile"
         rm -f "$outfile"
     fi
 
-    log "Starting: myorca $input"
-
-    # Launch ORCA in background so we can monitor it
-    /home/yang/bin/myorca "$input" &
+    log "Starting: $MYORCA $input"
+    "$MYORCA" "$input" &
     local orca_pid=$!
-    local check_interval=300  # 5 minutes between checks
-    local stall_count=0
-    local last_size=0
-    local max_stalls=4        # 4 * 5min = 20min of no output = stalled
-    local check_num=0
-    local stall_reported=0
+    local check_interval="${ORCA_CHECK_INTERVAL:-300}"
+    local stall_count=0 last_size=0 check_num=0 stall_reported=0
+    local max_stalls="${ORCA_MAX_STALLS:-4}"
 
     while kill -0 "$orca_pid" 2>/dev/null; do
         sleep "$check_interval"
         check_num=$((check_num + 1))
 
-        # Check output growth (detect stalls)
         if [ -f "$outfile" ]; then
-            local cur_size=$(wc -c < "$outfile" 2>/dev/null || echo 0)
+            local cur_size
+            cur_size=$(wc -c < "$outfile" 2>/dev/null || echo 0)
             if [ "$cur_size" -eq "$last_size" ] && [ "$cur_size" -gt 0 ]; then
                 stall_count=$((stall_count + 1))
                 if [ "$stall_count" -ge "$max_stalls" ] && [ "$stall_reported" -eq 0 ]; then
-                    log "WARNING: Output stalled for $((stall_count * check_interval / 60)) min — possible hang"
+                    log "WARNING: output unchanged for $((stall_count * check_interval / 60)) min — review before killing; long kernels can be silent"
                     stall_reported=1
                 fi
             else
-                stall_count=0
-                last_size=$cur_size
-                stall_reported=0
+                stall_count=0; last_size=$cur_size; stall_reported=0
             fi
         fi
 
-        # Scan for fatal error patterns (every other check to reduce I/O)
         if [ "$((check_num % 2))" -eq 0 ] && [ -f "$outfile" ]; then
             for pattern in "${ERROR_PATTERNS[@]}"; do
-                if grep -q "$pattern" "$outfile"; then
-                    log "CRITICAL: Detected error pattern '$pattern' in $outfile"
-                    kill -9 "$orca_pid" 2>/dev/null
-                    wait "$orca_pid" 2>/dev/null
+                if grep -qi "$pattern" "$outfile"; then
+                    log "CRITICAL: detected error pattern '$pattern' in $outfile"
+                    kill -9 "$orca_pid" 2>/dev/null || true
+                    wait "$orca_pid" 2>/dev/null || true
                     diagnose_error "$basename" "$outfile" "$pattern"
                     return 1
                 fi
@@ -166,276 +272,152 @@ run_orca() {
         fi
     done
 
-    # Process finished — wait and check result
-    wait "$orca_pid" 2>/dev/null
-
+    wait "$orca_pid" 2>/dev/null || true
     if orca_done "$outfile"; then
         log "SUCCESS: $basename completed normally"
         return 0
     fi
-
-    # Process exited but output doesn't show normal termination
-    log "ERROR: $basename process exited but no normal termination found"
+    log "ERROR: $basename process exited without normal termination"
     diagnose_error "$basename" "$outfile" ""
     return 1
 }
 
-#--------------------------------------------------------------------
-# Save a successfully-run input file as a verified template.
-# Only called after ORCA TERMINATED NORMALLY is confirmed.
-#--------------------------------------------------------------------
-save_template() {
-    local input=$1
-    local type_tag=$2
-    local note=$3  # optional: brief note about this specific run
+#------------------------------------------------------------------------------
+# Data extraction
+#------------------------------------------------------------------------------
+get_final_iroot() {
+    local outfile=$1 requested=${2:-1}
+    local r
+    r=$(grep "The IROOT now is:" "$outfile" | tail -1 | awk '{print $NF}')
+    echo "${r:-$requested}"
+}
 
+get_tddft_emission() {
+    # Returns: E(cm-1) f. Pass the final root index if root following changed IROOT.
+    local outfile=$1 root=${2:-1}
+    local last_spec data e_ev f
+    last_spec=$(grep -n "ABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE" "$outfile" | tail -1 | cut -d: -f1)
+    if [ -n "$last_spec" ]; then
+        data=$(tail -n +"$last_spec" "$outfile" | grep -E "0-1A[[:space:]]+->[[:space:]]+${root}-1A" | head -1)
+        e_ev=$(echo "$data" | awk '{print $4}')
+        f=$(echo "$data" | awk '{print $7}')
+    fi
+    if [[ "$e_ev" =~ ^[0-9]+([.][0-9]+)?$ ]] && [[ "$f" =~ ^[-+]?[0-9]*\.?[0-9]+([Ee][-+]?[0-9]+)?$ ]]; then
+        python3 - "$e_ev" "$f" <<'PYEOF'
+import sys
+print(f"{float(sys.argv[1])*8065.544005:.2f} {float(sys.argv[2]):.10g}")
+PYEOF
+    else
+        echo "0 0"
+    fi
+}
+
+get_k_ic() {
+    local outfile=$1
+    grep -i "calculated internal conversion rate constant" "$outfile" | tail -1 | awk '{print $(NF-1)}'
+}
+
+#------------------------------------------------------------------------------
+# Templates
+#------------------------------------------------------------------------------
+save_template() {
+    local input=$1 type_tag=$2 functional=$3 basis=$4 solvent=$5 dispersion=$6
+    local charge=$7 mult=$8 tda=$9 note=${10:-"syntax/run verified"}
+    local fslug bslug template_name template_path geom_start today
+
+    fslug=$(slugify "$functional")
+    bslug=$(slugify "$basis")
+    template_name="${type_tag//-/_}_${fslug}_${bslug}.inp"
+    template_path="$TEMPLATE_DIR/$template_name"
     mkdir -p "$TEMPLATE_DIR"
 
-    local basename="${input%.inp}"
-    local template_name="${type_tag}_camb3lyp_631gd.inp"
-    local template_path="$TEMPLATE_DIR/$template_name"
-
-    # Extract geometry placeholder line count for later reuse
-    local geom_start=$(grep -n '^\* xyz' "$input" | head -1 | cut -d: -f1)
-
-    # If a curated template already exists, do NOT overwrite it.
-    # Curated templates contain detailed comments and are more valuable
-    # than auto-saved raw inputs. Only save if no template exists yet.
     if [ -f "$template_path" ]; then
-        log "Template $template_name already exists — skipping (curated version preserved)"
+        log "Template $template_name exists — not overwriting curated file"
         return 0
     fi
 
-    log "Creating new template: $template_name"
+    geom_start=$(grep -n -m1 -E '^\*[[:space:]]+xyz|^\*[[:space:]]+XYZ' "$input" | cut -d: -f1)
+    if [ -z "$geom_start" ]; then
+        log "WARNING: cannot locate geometry block; template not saved"
+        return 1
+    fi
+    today=$(date '+%Y-%m-%d')
 
-    # Build annotated template
-    local today=$(date '+%Y-%m-%d')
-    local header_block=$(head -n "$((geom_start - 1))" "$input")
-
-    cat > "$template_path" << EOF
-#===============================================================================
-# @TYPE:       ${type_tag}
-# @FUNCTIONAL: CAM-B3LYP
-# @BASIS:      6-31G(d)
-# @SOLVENT:    CPCM(Methanol)
-# @DISPERSION: D3BJ
-# @ORCA:       6.1.0 (libXC 7.0.0)
-# @CHARGE:     1
-# @MULT:       1
-# @VERIFIED:   ${today} — ${basename} — ${note}
-#===============================================================================
-${header_block}
-#===============================================================================
-# To reuse: replace the geometry section below with your coordinates.
-# Geometry must be charge=1, multiplicity=1 (closed-shell singlet).
-#===============================================================================
-
-* xyz 1 1
-  <INSERT GEOMETRY HERE — from optimized .xyz of previous phase>
-*
-EOF
-
+    {
+        echo "#==============================================================================="
+        echo "# @TYPE:       $type_tag"
+        echo "# @FUNCTIONAL: $functional"
+        echo "# @BASIS:      $basis"
+        echo "# @SOLVENT:    $solvent"
+        echo "# @DISPERSION: $dispersion"
+        echo "# @TDA:        $tda"
+        echo "# @CHARGE:     $charge"
+        echo "# @MULT:       $mult"
+        echo "# @ORCA:       ${ORCA_VERSION:-6.1.x}"
+        echo "# @STATUS:     VERIFIED-SYNTAX"
+        echo "# @VERIFIED:   $today — ${input%.inp} — $note"
+        echo "#==============================================================================="
+        head -n "$((geom_start - 1))" "$input"
+        echo ""
+        echo "* xyz $charge $mult"
+        echo "  <INSERT GEOMETRY HERE>"
+        echo "*"
+    } > "$template_path"
     log "Template saved: $template_path"
 }
 
-#--------------------------------------------------------------------
-# Send email notification via SMTP.
-# Set env vars: EMAIL_TO, EMAIL_FROM, SMTP_USER, SMTP_PASS, SMTP_HOST, SMTP_PORT
-# Example (163.com): SMTP_HOST=smtp.163.com SMTP_PORT=465
-#--------------------------------------------------------------------
+#------------------------------------------------------------------------------
+# Diagnostics / notifications
+#------------------------------------------------------------------------------
+diagnose_error() {
+    local basename=$1 outfile=$2 matched_pattern=${3:-}
+    local diag="/tmp/orca_diag_${$}.txt"
+    {
+        echo "--- Last 30 lines ---"
+        tail -30 "$outfile" 2>/dev/null
+        echo ""
+        echo "--- Error/warning context ---"
+        grep -i -B2 -A5 "error\|abort\|fatal\|warning\|cannot\|unable\|fail" "$outfile" 2>/dev/null | tail -60
+    } > "$diag"
+    [ -n "$matched_pattern" ] && log "Matched pattern: $matched_pattern"
+    log "Diagnosis saved to $diag"
+}
+
 EMAIL_TO="${EMAIL_TO:-}"
-EMAIL_FROM="${EMAIL_FROM:-}"
+EMAIL_FROM="${EMAIL_FROM:-${SMTP_USER:-}}"
 SMTP_USER="${SMTP_USER:-}"
 SMTP_PASS="${SMTP_PASS:-}"
 SMTP_HOST="${SMTP_HOST:-smtp.163.com}"
 SMTP_PORT="${SMTP_PORT:-465}"
 
 send_notification() {
-    local subject="$1"
-    local body="$2"
-    if [ -z "$SMTP_PASS" ]; then
-        log "Email not configured — set SMTP_PASS env var"
-        return 0
-    fi
-    python3 - "$subject" "$body" "$EMAIL_TO" "$EMAIL_FROM" "$SMTP_USER" "$SMTP_PASS" "$SMTP_HOST" "$SMTP_PORT" << 'PYEOF'
+    local subject="$1" body="$2"
+    [ -z "$SMTP_PASS" ] && { log "Email not configured — skipping"; return 0; }
+    python3 - "$subject" "$body" "$EMAIL_TO" "$EMAIL_FROM" "$SMTP_USER" "$SMTP_PASS" "$SMTP_HOST" "$SMTP_PORT" <<'PYEOF'
 import sys, smtplib
 from email.mime.text import MIMEText
-s, b, t, f, u, p, h, port = sys.argv[1:9]
-msg = MIMEText(b, 'plain', 'utf-8')
-msg['Subject'] = s; msg['From'] = f; msg['To'] = t
-try:
-    sv = smtplib.SMTP_SSL(h, int(port))
-    sv.login(u, p); sv.sendmail(f, [t], msg.as_string()); sv.quit()
-    print("Email sent:", s)
-except Exception as e:
-    print("Email failed:", e)
+s,b,t,f,u,p,h,port=sys.argv[1:9]
+if not all([t,f,u,p]):
+    raise SystemExit("Email configuration incomplete")
+msg=MIMEText(b,'plain','utf-8'); msg['Subject']=s; msg['From']=f; msg['To']=t
+with smtplib.SMTP_SSL(h,int(port)) as sv:
+    sv.login(u,p); sv.sendmail(f,[t],msg.as_string())
 PYEOF
 }
 
 notify_summary() {
-    local event="$1"
-    local subject="[AutoORCA] ${event} — $(date '+%m/%d %H:%M')"
-    local body=$(python3 -c "
-import json
-with open('cascade_status.json') as f:
-    d = json.load(f)
-lines = ['Phase: ' + d.get('phase','unknown'), '']
-for mol in d.get('molecules', {}):
-    m = d['molecules'][mol]
-    lines.append(f'{mol}:')
-    for k in ['s0_energy','s1_energy_cm1','s1_f_osc','k_ic','phi_f','lambda_em']:
-        v = m.get(k)
-        if v is not None: lines.append(f'  {k}: {v}')
-lines.append('')
-lines.append('Working directory: ' + '$(pwd)')
-print('\n'.join(lines))
-" 2>/dev/null)
-    send_notification "$subject" "${body:-No status data available}"
-}
-
-#--------------------------------------------------------------------
-# Diagnose why an ORCA job failed — extract error context from output
-#--------------------------------------------------------------------
-diagnose_error() {
-    local basename=$1
-    local outfile=$2
-    local matched_pattern=$3
-
-    log "=== ERROR DIAGNOSIS: $basename ==="
-    [ -n "$matched_pattern" ] && log "Matched pattern: $matched_pattern"
-
-    # Dump error context as a single block to avoid N log lines
-    {
-        echo "--- Last 20 lines ---"
-        tail -20 "$outfile" 2>/dev/null
-        echo ""
-        echo "--- Error/warning context ---"
-        grep -i -B2 -A5 "error\|abort\|fatal\|WARNING\|cannot\|unable\|fail" "$outfile" 2>/dev/null | tail -30
-    } > "/tmp/orca_diag_$$.txt"
-
-    if job_running "$basename"; then
-        log "STATUS: process still alive (zombie?)"
-    else
-        log "STATUS: process exited (crashed/killed)"
-    fi
-    log "Full diagnosis saved to /tmp/orca_diag_$$.txt"
-}
-
-#--------------------------------------------------------------------
-# Extract TD-DFT emission data from S1 optimized output
-# Returns: "E_em(cm-1) f_osc"
-#--------------------------------------------------------------------
-get_tddft_emission() {
-    local outfile=$1
-    local e_ev=""
-    local f=""
-
-    # ORCA 6.1: look for the last "0-1A  ->  1-1A" line in absorption spectrum
-    # Format: 0-1A  ->  1-1A    <eV>   <cm-1>   <nm>   <fosc(D2)> ...
-    # awk fields: $1=0-1A $2=-> $3=1-1A $4=eV $5=cm-1 $6=nm $7=fosc
-    local last_spec=$(grep -n "ABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE" "$outfile" | tail -1 | cut -d: -f1)
-    if [ -n "$last_spec" ]; then
-        local data=$(tail -n +"$last_spec" "$outfile" | grep "0-1A.*1-1A" | head -1)
-        e_ev=$(echo "$data" | awk '{print $4}')
-        f=$(echo "$data" | awk '{print $7}')
-    fi
-
-    # Fallback: "STATE  1:" format
-    if [ -z "$e_ev" ]; then
-        local state_line=$(grep "STATE\s*1:" "$outfile" | tail -1)
-        if [ -n "$state_line" ]; then
-            e_ev=$(echo "$state_line" | sed -n 's/.*E=\s*[0-9.]*\s*au\s*\([0-9.]*\)\s*eV.*/\1/p')
-        fi
-    fi
-
-    if [ -n "$e_ev" ] && [ -n "$f" ]; then
-        local e_cm1=$(python3 -c "print('{:.2f}'.format(float($e_ev)*8065.54))")
-        echo "$e_cm1 $f"
-    else
-        echo "0 0"
-    fi
-}
-
-#--------------------------------------------------------------------
-# Extract k_IC from ESD output
-#--------------------------------------------------------------------
-get_k_ic() {
-    local outfile=$1
-    # Format: "The calculated internal conversion rate constant is  -4.954889e-02 s-1"
-    local val=$(grep -i "internal conversion rate constant" "$outfile" | tail -1 | awk '{print $(NF-1)}')
-    # Take absolute value (ORCA reports negative for S1→S0 direction)
-    val="${val#-}"
-    echo "${val:-0}"
-}
-
-#--------------------------------------------------------------------
-# Write JSON status (simple key=value approach using python)
-#--------------------------------------------------------------------
-update_status() {
-    python3 - "$STATUS_FILE" "$@" << 'PYEOF'
-import sys, json, os
-
-status_file = sys.argv[1]
-del sys.argv[1]
-with open(status_file) as f:
-    data = json.load(f)
-
-# args: phase field value [phase field value ...]
-args = sys.argv[1:]
-i = 0
-while i < len(args):
-    if args[i] == "--phase":
-        data["phase"] = args[i+1]
-        i += 2
-    elif args[i] == "--mol":
-        mol = args[i+1]
-        key = args[i+2]
-        val = args[i+3]
-        if val == "null":
-            data["molecules"][mol][key] = None
-        elif val == "true":
-            data["molecules"][mol][key] = True
-        elif val == "false":
-            data["molecules"][mol][key] = False
-        else:
-            try:
-                data["molecules"][mol][key] = float(val)
-            except ValueError:
-                data["molecules"][mol][key] = val
-        i += 4
-    else:
-        i += 1
-
-with open(status_file, "w") as f:
-    json.dump(data, f, indent=2)
-print(f"Status updated: phase={data['phase']}")
+    local event="$1" subject="[AutoORCA] ${1} — $(date '+%m/%d %H:%M')"
+    local body
+    body=$(python3 - "$STATUS_FILE" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f: d=json.load(f)
+lines=["Phase: "+d.get("phase","unknown"),""]
+for mol,m in d.get("molecules",{}).items():
+    lines.append(mol+":")
+    for k,v in m.items():
+        lines.append(f"  {k}: {v}")
+print("\n".join(lines))
 PYEOF
-}
-
-#--------------------------------------------------------------------
-# Print summary of current status
-#--------------------------------------------------------------------
-print_status() {
-    python3 - "$STATUS_FILE" << 'PYEOF'
-import sys, json
-
-with open(sys.argv[1]) as f:
-    d = json.load(f)
-
-print(f"\n{'='*60}")
-print(f"  CASCADE STATUS — Phase: {d['phase']}")
-print(f"{'='*60}")
-for mol in ["LSH-33", "LSH-34"]:
-    m = d["molecules"][mol]
-    print(f"\n  {mol}:")
-    print(f"    S₀ Energy:      {m['s0_energy']} Eh")
-    print(f"    S₀ Imag Freq:   {m['s0_imag_freq']}")
-    print(f"    S₁ E_em:        {m['s1_energy_cm1']} cm⁻¹")
-    print(f"    S₁ f_osc:        {m['s1_f_osc']}")
-    print(f"    S₁ converged:   {m['s1_converged']}")
-    print(f"    k_IC:           {m['k_ic']} s⁻¹")
-    print(f"    Φ_F:            {m['phi_f']}")
-    print(f"    λ_em:           {m['lambda_em']} nm")
-print(f"\n{'='*60}\n")
-PYEOF
+)
+    send_notification "$subject" "$body"
 }

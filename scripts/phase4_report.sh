@@ -1,109 +1,65 @@
-#!/bin/bash
-#==============================================================================
-# Phase 4: Quantum Yield Calculation & Report
-#
-# Reads cascade_status.json, calculates Phi_F, writes cascade_report.md.
-# No customization needed — reads all data from the status file.
-#==============================================================================
-source "$(dirname "$0")/shared_functions.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/shared_functions.sh"
 
 log "=================================================="
-log "  PHASE 4: Quantum Yield & Report"
+log "  PHASE 4: guarded photophysics report"
 log "=================================================="
 
-python3 << 'PYEOF'
-import json
+python3 - "$STATUS_FILE" <<'PYEOF'
+import json, sys
+path=sys.argv[1]
+with open(path) as f: data=json.load(f)
 
-with open("cascade_status.json") as f:
-    data = json.load(f)
+for mol,m in data.get("molecules",{}).items():
+    fosc=float(m.get("s1_f_osc") or 0)
+    wn=float(m.get("s1_energy_cm1") or 0)
+    kic=float(m.get("k_ic") or 0)
+    # Vacuum electric-dipole Einstein-A estimate from vertical f and wavenumber.
+    # This is not a vibronic ESD fluorescence rate.
+    kr_approx=(fosc*wn**2/1.499) if fosc>0 and wn>0 else 0.0
+    kr=float(m.get("k_r") or kr_approx)
+    m["k_r_approx"]=kr_approx
 
-molecules = list(data["molecules"].keys())
-
-for mol in molecules:
-    m = data["molecules"][mol]
-    f_val = m.get("s1_f_osc") or 0
-    e_em = m.get("s1_energy_cm1") or 0
-    k_ic = m.get("k_ic") or 0
-
-    if f_val > 0 and e_em > 0:
-        k_r = (f_val * e_em**2) / 1.499e8 * 1e8
+    kisc=m.get("k_isc")
+    knr_other=m.get("k_nr_other")
+    if kisc is not None or knr_other is not None:
+        total=kr+kic+float(kisc or 0)+float(knr_other or 0)
+        m["phi_f_model"]=kr/total if total>0 else None
+        m["phi_f_model_complete"]=True
     else:
-        k_r = 0
+        total=kr+kic
+        m["phi_f_two_channel"]=kr/total if total>0 else None
+        m["phi_f_model_complete"]=False
 
-    phi_f = k_r / (k_r + k_ic) if (k_r + k_ic) > 0 else 0
-    lam = (1e7 / e_em) if e_em > 0 else 0
+data["phase"]="complete"
+with open(path,"w") as f: json.dump(data,f,indent=2)
 
-    m["k_r"] = k_r
-    m["phi_f"] = phi_f
-    m["lambda_em"] = lam
-    data["molecules"][mol] = m
-
-data["phase"] = "complete"
-
-with open("cascade_status.json", "w") as f:
-    json.dump(data, f, indent=2)
-
-# ---- Generate Report ----
-def fmt(val, dec=4):
-    if val is None or val == 0:
-        return "N/A"
-    return f"{val:.{dec}f}"
-
-lines = []
-lines.append("# Photophysical Cascade Report")
-lines.append("")
-lines.append("## Results Summary")
-lines.append("")
-header = "| Parameter | " + " | ".join(molecules) + " |"
-lines.append(header)
-lines.append("|" + "|".join([":---:"] * (len(molecules) + 1)) + "|")
-
-keys = [
-    ("S0 Energy (Eh)", "s0_energy", 6),
-    ("E_em (cm-1)", "s1_energy_cm1", 1),
-    ("lambda_em (nm)", "lambda_em", 1),
-    ("f_osc", "s1_f_osc", 6),
-    ("k_r (s-1)", "k_r", 2),
-    ("k_IC (s-1)", "k_ic", 2),
-    ("Phi_F", "phi_f", 6),
+lines=["# AutoORCA Photophysics Report","","## Scientific caveats",""]
+lines += [
+    "- A normal ORCA termination is not by itself proof of a valid electronic-state assignment.",
+    "- `k_r_approx` is an Einstein-A estimate from a vertical oscillator strength, not an ORCA_ESD vibronic fluorescence rate.",
+    "- `Phi_F(two-channel)` uses only k_r and k_IC. It is not a complete fluorescence quantum yield when ISC or other non-radiative channels matter.",
+    "- Do not construct E00 or reorganization energies from mixed method/basis/solvent energy legs; use the energy-consistency gate in SKILL.md.",
+    ""
 ]
-for label, key, dec in keys:
-    vals = [fmt(data["molecules"][m].get(key, 0), dec) for m in molecules]
-    lines.append(f"| {label} | " + " | ".join(vals) + " |")
 
-lines.append("")
-lines.append("## Formulas")
-lines.append("")
-lines.append("k_r = f * E_em^2 / 1.499e8 * 1e8  [s-1]")
-lines.append("Phi_F = k_r / (k_r + k_IC)")
-lines.append("")
-
-# Detailed sections
-for mol in molecules:
-    d = data["molecules"][mol]
-    lines.append(f"## {mol}")
+for mol,m in data.get("molecules",{}).items():
+    lines += [f"## {mol}",""]
+    keys=["s0_energy","s0_imag_freq","s1_energy_cm1","lambda_em","s1_f_osc","s1_imag_freq","s1_final_root","k_ic","k_r_approx","phi_f_two_channel","phi_f_model"]
+    for k in keys:
+        if k in m and m[k] is not None:
+            lines.append(f"- **{k}**: {m[k]}")
     lines.append("")
-    for label, key, unit, dec in [
-        ("S0 Energy", "s0_energy", "Eh", 6),
-        ("E_em", "s1_energy_cm1", "cm-1", 1),
-        ("lambda_em", "lambda_em", "nm", 1),
-        ("f_osc", "s1_f_osc", "", 6),
-        ("k_r", "k_r", "s-1", 2),
-        ("k_IC", "k_ic", "s-1", 2),
-        ("Phi_F", "phi_f", "", 6),
-    ]:
-        val = fmt(d.get(key, 0), dec)
-        lines.append(f"- **{label}**: {val} {unit}".strip())
 
-report = "\n".join(lines)
+lines += ["## Method provenance","", "```json", json.dumps(data.get("methods",{}),indent=2), "```", ""]
+if data.get("warnings"):
+    lines += ["## Warnings",""] + [f"- {w}" for w in data["warnings"]] + [""]
 
-with open("cascade_report.md", "w") as f:
-    f.write(report)
-
+report="\n".join(lines)
+with open("cascade_report.md","w") as f:f.write(report)
 print(report)
-print("\n" + "=" * 60)
-print("Report saved to cascade_report.md")
 PYEOF
 
-update_status --phase "complete"
-log "Phase 4 finished -- cascade complete."
+print_status

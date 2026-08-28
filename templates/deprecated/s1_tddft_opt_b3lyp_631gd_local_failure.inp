@@ -46,15 +46,15 @@
 #   → 2nd optimization cycle: CIS module crashes with SIGABRT in CPSCF_Calc_XC
 #   → TDA helped the first cycle but LibXC B3LYP is fundamentally unstable
 #
-# ROOT CAUSE: ORCA 6.1's LibXC interface for B3LYP (functional 106) has an
-# intermittent bug in the XC kernel evaluation (CPSCF_Calc_XC) during TD-DFT
-# gradient calculations. It crashes unpredictably — sometimes on the 1st cycle,
-# sometimes after several cycles. The ORCA 6.1 manual does NOT document any
-# "third functional derivative" restriction for B3LYP, suggesting this is a
-# bug, not a documented limitation.
+# LOCAL OBSERVATION: In the tested ORCA 6.1.0/libXC environment, the attempted
+# LibXC/PBE-decoy B3LYP excited-state optimization workflow crashed in
+# CPSCF_Calc_XC. Do NOT generalize this into a claim that B3LYP TD-DFT
+# gradients are unsupported in ORCA 6.1; the ORCA 6.1 manual documents
+# analytic TD-DFT gradients generally. Treat this file as a historical local
+# failure record, not an ORCA-wide limitation.
 #
-# RESOLUTION: Switched to CAM-B3LYP for the entire cascade. CAM-B3LYP has
-# native analytical TD-DFT gradient support in ORCA 6.1 without any workarounds.
+# LOCAL RESOLUTION: CAM-B3LYP was used successfully in that project. This is
+# project-specific evidence, not a universal method-selection rule.
 #===============================================================================
 #
 # ===== ARCHIVED: Original workaround notes (kept for reference) =====
@@ -66,8 +66,8 @@
 # D3BJ pitfall: PBE decoy loads PBE's D3BJ parameters. D3 override
 # keywords (D3s6/s8/a1/a2) are NOT valid in ORCA 6.1 %method block.
 #
-# TDA: tda true is needed for stability but does NOT fully resolve the
-# intermittent LibXC B3LYP crash.
+# LOCAL NOTE: tda true improved stability in this specific failed workflow but
+# did not resolve the crash. This is not a universal TDA requirement.
 #
 #===============================================================================
 # KEYWORDS EXPLAINED:

@@ -1,83 +1,66 @@
-#!/bin/bash
-#==============================================================================
-# Phase 3: ESD(IC) Internal Conversion Rate
-#
-# Generates ESD input from S1 optimized geometry.
-# Uses S1 Hessian if available (from NumFreq), falls back to S0 Hessian (VG).
-# Customize: MOLECULES, FUNCTIONAL, BASIS, SOLVENT below.
-#==============================================================================
-source "$(dirname "$0")/shared_functions.sh"
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "$SCRIPT_DIR/shared_functions.sh"
+CONFIG="${AUTOORCA_CONFIG:-$WORKDIR/project_config.sh}"
+[ -f "$CONFIG" ] && source "$CONFIG" || source "$SCRIPT_DIR/project_config.sh.example"
 
-# ========================== CUSTOMIZE HERE ==========================
-MOLECULES=("MOL1" "MOL2")
-FUNCTIONAL="CAM-B3LYP"
-BASIS="6-31G(d)"
-SOLVENT="CPCM(Methanol)"
-# ====================================================================
+init_status "${MOLECULES[@]}"
+check_hessian_method_compatibility
+
+# For an AH IC calculation, use the same PES method as the Hessians by default.
+record_method "esd_ic" "$S0_FUNCTIONAL" "$S0_BASIS" "$S0_DISPERSION" "$S0_SOLVENT" "$IC_TDA" "$CHARGE" "$MULT" "S0 geometry + S0/S1 Hessians"
 
 log "=================================================="
-log "  PHASE 3: ESD(IC) IC Rate"
+log "  PHASE 3: ESD(IC) — guarded AH workflow"
 log "=================================================="
 
 for mol in "${MOLECULES[@]}"; do
-    log "--- $mol ESD(IC) ---"
+    read -r s0_xyz s0_hess s1_hess <<< "$(python3 - "$STATUS_FILE" "$mol" <<'PYEOF'
+import json,sys
+with open(sys.argv[1]) as f:d=json.load(f)
+m=d["molecules"][sys.argv[2]]
+print(m.get("s0_xyz",""), m.get("s0_hess",""), m.get("s1_hess",""))
+PYEOF
+)"
 
-    s1_xyz="${mol}_S1_Opt.xyz"
-    esd_inp="${mol}_ESD.inp"
-    esd_out="${mol}_ESD.out"
+    for f in "$s0_xyz" "$s0_hess" "$s1_hess"; do
+        [ -f "$f" ] || { log "FATAL: required ESD(IC) file missing: $f"; exit 1; }
+    done
 
-    # Determine which S1 Hessian to use
-    s1_hess="${mol}_S1_NumFreq.hess"
-    if [ ! -f "$s1_hess" ]; then
-        log "No S1 NumFreq Hessian found, using S0 Hessian (VG approximation)"
-        s1_hess="${mol}.hess"
-    fi
-
-    # Generate ESD input
-    if [ ! -f "$esd_inp" ]; then
-        if [ ! -f "$s1_xyz" ]; then
-            s1_xyz="${mol}.xyz"
-        fi
+    inp="${mol}_ESD_IC.inp"
+    out="${mol}_ESD_IC.out"
+    if [ ! -f "$inp" ]; then
         {
-            echo "# ${mol} ESD(IC) | ${FUNCTIONAL}/${BASIS} | ${SOLVENT}"
-            echo "! ${FUNCTIONAL} RIJCOSX ${BASIS} ${SOLVENT} ESD(IC) TightScf"
-            echo ""
-            echo "%maxcore 3072"
-            echo "%pal nprocs 16 end"
-            echo ""
+            echo "# ${mol} S1->S0 ESD(IC), AH Hessians"
+            echo "! ${S0_FUNCTIONAL} RIJCOSX ${S0_BASIS} ${S0_DISPERSION} ${S0_SOLVENT} ESD(IC) TightScf"
+            echo "%maxcore ${MAXCORE}"
+            echo "%pal nprocs ${NPROCS} end"
             echo "%tddft"
-            echo "  nroots 5"
-            echo "  iroot 1"
+            echo "  tda ${IC_TDA}"
+            echo "  nroots ${NROOTS}"
+            echo "  iroot ${IROOT}"
             echo "  nacme true"
-            echo "  etf   true"
-            echo "  tda   true"
+            echo "  etf true"
             echo "end"
-            echo ""
             echo "%esd"
-            echo "  gshessian \"${mol}.hess\""
+            echo "  gshessian \"${s0_hess}\""
             echo "  eshessian \"${s1_hess}\""
             echo "  usej true"
             echo "end"
-            echo ""
-            echo "* xyz 1 1"
-            tail -n +3 "$s1_xyz"
+            echo "* xyz ${CHARGE} ${MULT}"
+            # IMPORTANT: ORCA 6.1 ESD input geometry must match GSHESSIAN.
+            tail -n +3 "$s0_xyz"
             echo "*"
-        } > "$esd_inp"
+        } > "$inp"
     fi
 
-    if orca_done "$esd_out"; then
-        log "$esd_out already completed."
-    else
-        run_orca "$esd_inp" || { log "FATAL: $mol ESD failed"; exit 1; }
-    fi
-
-    k_ic=$(get_k_ic "$esd_out")
-    log "$mol: k_IC = $k_ic s-1"
-
+    run_orca "$inp" || exit 1
+    k_ic=$(get_k_ic "$out")
+    [[ "$k_ic" =~ ^[+]?[0-9]*\.?[0-9]+([Ee][-+]?[0-9]+)?$ ]] || { log "FATAL: failed to extract non-negative k_IC"; exit 1; }
     update_status --phase "esd_running" --mol "$mol" k_ic "$k_ic"
-    save_template "$esd_inp" "esd-vg-ic" "ESD(IC) passed"
+    save_template "$inp" "esd-ic-ah" "$S0_FUNCTIONAL" "$S0_BASIS" "$S0_SOLVENT" "$S0_DISPERSION" "$CHARGE" "$MULT" "$IC_TDA" "ESD(IC) completed with explicit S0/S1 Hessians"
 done
 
 update_status --phase "esd_done"
 print_status
-log "Phase 3 finished. Review above, then run phase4_report.sh."

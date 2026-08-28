@@ -1,106 +1,142 @@
-# AutoORCA — Automated ORCA Photophysics Cascade Framework
+# AutoORCA 3.0 — Guarded ORCA Photophysics Workflows
 
-A methodology and script toolkit for automating multi-step ORCA quantum chemistry workflows: ground-state optimization → excited-state TD-DFT → ESD internal conversion rates → quantum yield reports.
+AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-## What This Repository Contains
+The 3.0 revision adds scientific guardrails that were missing from the early version: method provenance, state-identity checks, consistent energy-cycle rules, corrected ESD(IC) setup, configurable resources, and explicit uncertainty in photophysical reporting.
 
-```
+## Repository layout
+
+```text
 .
-├── README.md                      # This file
-├── .gitignore                     # Excludes ORCA outputs, binaries, manual
-├── skills/autoorca/SKILL.md       # Claude Code skill — methodology reference
+├── README.md
+├── skills/autoorca/SKILL.md
+├── references/
+│   └── photophysics_consistency.md
 ├── scripts/
-│   ├── shared_functions.sh        # Core library (run_orca, monitoring, data extraction)
-│   ├── phase1_s0.sh               # Template: S0 Opt+Freq
-│   ├── phase2_s1.sh               # Template: S1 TD-DFT Opt
-│   ├── phase3_esd.sh              # Template: ESD(IC)
-│   ├── phase4_report.sh           # Template: quantum yield + report
-│   └── autopilot.sh               # Chains all phases with auto-review
-└── templates/                     # Empty — your verified templates will accumulate here
-    └── .gitkeep
+│   ├── project_config.sh.example
+│   ├── shared_functions.sh
+│   ├── phase1_s0.sh
+│   ├── phase2_s1.sh
+│   ├── phase3_esd.sh
+│   ├── phase4_report.sh
+│   ├── energy_cycle_guard.py       # refuses mixed-level E00/energy cycles
+│   └── autopilot.sh
+└── templates/
+    ├── s0_opt_freq_camb3lyp_631gd.inp
+    ├── s1_tddft_opt_camb3lyp_631gd.inp
+    ├── esd_ic_ah_camb3lyp_631gd.inp
+    ├── historical/                  # project-specific successful examples
+    └── deprecated/
+        └── ... historical local-failure records
 ```
 
-## What You Need to Provide
+## What changed from the early version
 
-| Resource | How to obtain | Expected location |
-|----------|--------------|-------------------|
-| **ORCA 6.1 binary** | [ORCA forum](https://orcaforum.kofo.mpg.de) (academic license) | `$ORCA_ROOT/orca` |
-| **ORCA 6.1 manual** | Convert the PDF to markdown, or keep the PDF as reference | `$ORCA_ROOT/manual/orca_manual_kb/` (optional) |
-| **`myorca` wrapper** | A simple script that calls ORCA with the right environment | `~/bin/myorca` or in `$PATH` |
-| **`tsp` (Task Spooler)** | `apt install tsp` or equivalent | System utility |
-| **Molecule input files** | Your `.inp` or `.xyz` files for the molecules you want to study | `$ORCA_ROOT/<project>/` |
+### Scientific hard stops
 
-### `myorca` wrapper example
+AutoORCA now treats these as errors or explicit warnings rather than silently continuing:
+
+- missing frequency summary is **not** interpreted as zero imaginary frequencies;
+- a normally terminated optimization must also show optimization convergence;
+- ESD(IC) no longer uses an S1 geometry as the main input geometry;
+- ESD(IC) no longer silently substitutes the S0 Hessian for a missing S1 Hessian;
+- the IC NACME stage defaults to full TD-DFT (`TDA false`), following the ORCA 6.1 manual recommendation;
+- GS/ES Hessian method provenance is compared before ESD(IC);
+- state/root identity is recorded and flagged for NTO/configuration review;
+- quantum yield is not presented as a complete result when only `k_r` and `k_IC` are known;
+- `E00` / reorganization energies are governed by an explicit energy-consistency gate in `SKILL.md`.
+
+### Engineering fixes
+
+The old repository contained several project-specific assumptions despite claiming to be generic. The 3.0 revision removes or fixes them:
+
+- no hard-coded `LSH-33` / `LSH-34` status printing;
+- no hard-coded `/home/yang/bin/myorca` requirement (use `MYORCA` env var; default `$HOME/bin/myorca`);
+- no hard-coded 16-core inputs (default config uses 8, configurable);
+- `%MaxCore` documentation corrected: it is MB **per processing core**;
+- `cascade_status.json` is actually auto-created;
+- template metadata is no longer hard-coded to CAM-B3LYP/6-31G(d)/MeOH/+1 regardless of the input;
+- duplicate hyphen/underscore templates were removed;
+- the template filename slug convention is now consistent.
+
+## Quick start
 
 ```bash
-#!/bin/bash
-ORCA_PATH="/path/to/orca/installation"
-export PATH=$ORCA_PATH:$PATH
-export LD_LIBRARY_PATH=$ORCA_PATH:$LD_LIBRARY_PATH
-$ORCA_PATH/orca "$1" > "${1%.inp}.out" 2>&1
+# 1. Copy scripts into a project directory, or call them from this repository.
+cp /path/to/orca610/scripts/project_config.sh.example ./project_config.sh
+
+# 2. Edit project_config.sh
+#    - molecules
+#    - charge/multiplicity
+#    - functional/basis/dispersion/solvent
+#    - NPROCS and MAXCORE
+
+# 3. Put initial XYZ files in the working directory:
+#    MOL1.xyz, MOL2.xyz, ...
+
+# 4. Configure the ORCA wrapper if needed
+export ORCA_ROOT=/data/software/orca610
+export MYORCA=$HOME/bin/myorca
+export ORCA_VERSION=6.1.0
+
+# 5. Run
+AUTOORCA_WORKDIR="$PWD" bash /path/to/orca610/scripts/autopilot.sh
 ```
 
-## Quick Start
+## Current cascade
 
-```bash
-# 1. Create a project directory
-mkdir -p $ORCA_ROOT/my-project
-cd $ORCA_ROOT/my-project
+```text
+Phase 1  S0 Opt+Freq
+         -> convergence + imaginary-frequency gate
+         -> S0 geometry/Hessian + method provenance
 
-# 2. Copy the phase script templates
-cp $ORCA_ROOT/scripts/phase1_s0.sh .
-cp $ORCA_ROOT/scripts/phase2_s1.sh .
-cp $ORCA_ROOT/scripts/phase3_esd.sh .
-cp $ORCA_ROOT/scripts/phase4_report.sh .
-cp $ORCA_ROOT/scripts/autopilot.sh .
+Phase 2  S1 Opt+Freq
+         -> FOLLOWIROOT + NTO generation
+         -> S1 minimum/Hessian gate
+         -> separate clean vertical-emission SP at final S1 geometry
 
-# 3. Edit each phase script — set MOLECULES, INPUTS, and functional/basis
-# 4. Place your molecule .inp files in the project directory
-# 5. Run the full cascade
-tsp bash autopilot.sh
+Phase 3  ESD(IC)
+         -> method-compatibility gate for S0/S1 Hessians
+         -> ground-state input geometry
+         -> full TD-DFT NACME by default
+
+Phase 4  Report
+         -> approximate radiative rate clearly labeled
+         -> two-channel Phi_F clearly labeled when ISC/other knr are absent
+         -> provenance + warnings retained
 ```
 
-## How It Works
+## Important methodological rule: geometry level vs energy level
 
-### Phased Architecture
+It is valid to optimize geometries at different or cheaper levels and then evaluate them with a common higher-level method.
 
-Each phase runs independently with review gates between them:
+It is **not** valid to subtract unrelated absolute energies, for example:
 
-```
-Phase 1: S0 Opt+Freq  →  check imaginary frequencies  →  extract S0 energy
-Phase 2: S1 TD-DFT Opt  →  extract E_em, f_osc  →  validate data
-Phase 3: ESD(IC)  →  extract k_IC  →  validate rate
-Phase 4: Python script  →  calculate Phi_F  →  write report.md
+```text
+E(S1, CAM-B3LYP/def2-SVPD) - E(S0, B3LYP/def2-SVP)
 ```
 
-### Shared State
+and call the result an adiabatic excitation energy or `E00`.
 
-A `cascade_status.json` file in the project directory tracks progress across phases. Each phase reads current state, does its work, updates the state.
+For a four-point photophysical cycle, evaluate all four final energy legs at one consistent energy level. See `skills/autoorca/SKILL.md` and `references/photophysics_consistency.md`. A machine-checkable example is provided via `scripts/energy_cycle_guard.py examples/energy_cycle.example.json`.
 
-### Template Knowledge Base
+## ORCA 6.1 points verified against the official manual
 
-As calculations succeed, templates are auto-saved to `$ORCA_ROOT/templates/` with `@TYPE`, `@FUNCTIONAL`, `@BASIS`, and `@VERIFIED` tags. This becomes your personal knowledge base — **never** committed to this repository.
+- TD-DFT uses TDA by default; `TDA false` requests full TD-DFT.
+- `FOLLOWIROOT TRUE` is available for difficult excited-state optimizations.
+- LR-CPCM uses non-equilibrium solvation by default for vertical excitation and equilibrium behavior for excited-state gradients/frequencies/ESD unless overridden.
+- ESD(IC) requires GS/ES Hessian information; the manual recommends full TD-DFT for NACME and uses the GS geometry in the example.
+- STEOM `Percentage Active Character > 98%` is the manual's active-space convergence criterion.
+- `%MaxCore` is MB per processing core.
 
-### Monitoring
+Official manual: https://www.faccts.de/docs/orca/6.1/manual/
 
-The `run_orca()` function in `shared_functions.sh` runs ORCA in the background and monitors:
-- Process existence (detect crashes)
-- Output file growth (detect stalls)
-- Error patterns (detect input errors, functional issues, file-not-found, etc.)
+## Historical B3LYP failure record
 
-### Resource Management
+The old repository generalized a local ORCA 6.1.0/LibXC crash into an ORCA-wide statement that B3LYP TD-DFT gradients were unreliable/unsupported. That wording was too strong.
 
-- **tsp** ensures serial job execution (no two ORCA jobs run simultaneously)
-- **!PAL16(4x4)** syntax for parallel numerical frequency displacements
-- Memory and disk budgeting guidelines in the SKILL.md
+The historical failed input has been retained under `templates/deprecated/` as a **local environment observation**. ORCA 6.1 documentation states that analytic TD-DFT gradients are available generally, so a local failure should be reproduced and checked against the changelog before becoming a global rule.
 
-## ORCA 6.1 Notes
+## Scope
 
-- **CAM-B3LYP** and **PBE0** are recommended for TD-DFT (native gradient support)
-- **B3LYP** TD-DFT gradients are NOT reliably supported — avoid
-- **ESD(IC)** requires `nacme true` in `%tddft` block (NOT `do_ic`)
-- Manual reference: `manual/orca_manual_kb/` (not included — convert from PDF yourself)
-
-## License
-
-This workflow framework is provided as-is for academic use. ORCA itself requires a separate academic license from the Max Planck Institute.
+This repository provides workflow guardrails, not a universal recommendation for CAM-B3LYP, 6-31G(d), CPCM, D3BJ, TDA/full TD-DFT, or any other specific method. Method selection remains system- and property-dependent.

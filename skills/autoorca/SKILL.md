@@ -1,340 +1,466 @@
 ---
 name: autoorca
-description: Automate ORCA quantum chemistry workflows with phased cascade design, template-based knowledge accumulation, manual-driven debugging, error pattern monitoring, and resource-aware job scheduling. Use when the user asks to run multi-step ORCA calculations, set up automated computational chemistry pipelines, debug ORCA errors, build reusable calculation templates, or manage long-running quantum chemistry jobs. Applies to any functional, basis set, or calculation type — not specific to any one chemistry problem.
-version: 2.1.0
+description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
+version: 3.0.0
 ---
 
-# AutoORCA — Methodology for Automated Computational Chemistry
+# AutoORCA — Scientifically Guarded ORCA Workflows
 
-This skill encodes the **process**, not specific conclusions. It applies to any ORCA calculation type — swap the functional, basis, solvent, or method and the workflow remains the same.
+This skill automates **process without relaxing physical consistency**. A calculation is not considered successful merely because ORCA terminates normally: the workflow must also preserve method provenance, state identity, and valid energy definitions.
 
-## Core Principles
+## Core principles
 
-1. **Phase the work**: Break multi-step calculations into independent phases with review gates between them
-2. **Accumulate knowledge**: Every successful calculation becomes a curated, searchable template
-3. **Debug from the manual**: Never guess keywords — search the ORCA manual for correct syntax and working examples
-4. **Monitor minimally**: Log only at job boundaries (start/done/error). The output file is the progress record — don't resurface it line-by-line.
-5. **Respect resources**: queue jobs serially, parallelize at the right level, budget memory and disk
-
----
-
-## Principle 1: Phased Cascade Architecture
-
-### Why Phase?
-A monolithic script that runs everything end-to-end will fail silently at step 3, wasting hours of compute. Phasing creates natural checkpoints where results are validated before proceeding.
-
-### Standard Phase Design
-```
-Phase N: [Calculation Type]
-  → Run calculation for all molecules
-  → Extract key data into a shared JSON status file
-  → Auto-review: check data against expected ranges
-  → On failure: diagnose, fix input, re-run THIS phase only
-  → On success: proceed to Phase N+1
-```
-
-### Shared State
-Use a JSON file (`cascade_status.json`) as the single source of truth between phases:
-```json
-{
-  "phase": "s0_done",
-  "molecules": {
-    "MOL-1": { "s0_energy": -978.51, "s0_imag_freq": 0, "s1_energy_cm1": null, ... }
-  }
-}
-```
-Each phase reads current state, runs its work, updates state.
-
-### Phase Script Template
-```bash
-#!/bin/bash
-source shared_functions.sh   # run_orca, get_*, check_*, update_status, print_status
-
-for mol in "${MOLS[@]}"; do
-    if orca_done "$outfile"; then
-        log "Already completed — skipping"
-    else
-        run_orca "$input" || { log "FATAL: $mol failed"; exit 1; }
-    fi
-    # Extract data, update status
-done
-update_status --phase "next_phase"
-print_status  # Human-readable summary for review
-```
-
-### Auto-Review Between Phases
-Before advancing, validate extracted data against physical expectations:
-```python
-# Example: S1 emission data validation
-if e_em <= 0:        issues.append("data extraction likely failed")
-elif e_em < 5000:    issues.append("unreasonably low emission energy")
-if f <= 0:           issues.append("oscillator strength not extracted")
-if not converged:    issues.append("optimization did not converge")
-```
-Adjust thresholds per chemical system. The goal is catching extraction failures and physically impossible values — NOT enforcing narrow expectations.
+1. **Scientific consistency before automation.** Never let a script combine quantities that are not physically comparable.
+2. **Record method provenance.** Every reported number must carry the electronic method, functional, basis, dispersion, solvent treatment, charge/multiplicity, excited-state formalism, geometry source, and ORCA version needed to interpret it.
+3. **Phase the work.** Use independent stages with review gates and restartability.
+4. **Track the electronic state, not only the root number.** `IROOT 1` is an ordering label, not a permanent state identity.
+5. **Controlled comparisons only.** When testing TDA vs full TD-DFT, basis sets, functionals, solvent models, etc., change one variable at a time unless explicitly performing a factorial comparison.
+6. **Use the ORCA manual as the syntax authority.** Treat local observations as local until confirmed by the manual/changelog.
+7. **Do not choose a method because it gives the expected answer.** Agreement with a desired color, wavelength, or literature value is evidence to evaluate, not a criterion for method selection.
+8. **Respect computational resources.** Parallelism, `%MaxCore`, scratch, and queueing must reflect the actual machine.
 
 ---
 
-## Principle 2: Template Knowledge Base
+# 1. Calculation identity and provenance
 
-### Why Templates?
-Trial-and-error on ORCA keywords is expensive (each attempt costs hours of compute). Templates capture what WORKED so you never solve the same problem twice.
+For every important result, maintain a method fingerprint. At minimum record:
 
-### Template Directory Structure
-```
-templates/
-  ├── s0_opt_freq_<functional>_<basis>.inp    # One per verified combination
-  ├── s1_tddft_opt_<functional>_<basis>.inp
-  └── esd_ic_<functional>_<basis>.inp
-```
-
-### Required Template Header Tags
-```
-# @TYPE:       <calculation-type>     e.g., s0-opt-freq, s1-tddft-opt, esd-vg-ic
-# @FUNCTIONAL: <functional-name>
-# @BASIS:      <basis-set>
-# @SOLVENT:    <solvent-model>
-# @ORCA:       <version>
-# @VERIFIED:   <date> — <molecule> — <key result confirming it worked>
-```
-
-### Template Lifecycle
-```
-Run succeeds  →  save_template() auto-creates raw template from working input
-              →  Curate: add detailed comments on WHY each setting, failed attempts, caveats
-              →  Mark @VERIFIED with date and evidence
-              
-Run fails     →  If template existed and was the basis: update with failure log
-              →  Mark @STATUS: DEPRECATED, point to working alternative
-              →  Never delete — failures are as educational as successes
+```text
+method_family:      DFT / TD-DFT / STEOM-CCSD / DLPNO-STEOM-CCSD / ...
+functional:         CAM-B3LYP / PBE0 / ... (if applicable)
+basis:              def2-SVPD / def2-TZVPD / ...
+dispersion:         D3BJ / D4 / none
+solvent_model:      CPCM / SMD / none
+solvent:            water / methanol / ...
+solvent_regime:     equilibrium / non-equilibrium / method-default
+tda:                true / false / n.a.
+relativistic:       none / ZORA / DKH / ...
+charge:             integer
+multiplicity:       integer
+root_requested:     integer or n.a.
+state_identity:     NTO/configuration description when relevant
+geometry_source:    calculation that produced the coordinates
+orca_version:       exact build if known
 ```
 
-### When to Create Templates
-- **After first successful run** of a new calculation type + functional + basis combination
-- **When a known combination is used on a chemically different system** (add note about system type)
-- **When a workaround is discovered** for a specific ORCA version limitation
-
-### When NOT to Create Templates
-- Never pre-create templates for calculation types not yet run
-- Never from failed calculations (unless deprecating an existing one)
-
-### Searching Templates
-```bash
-grep -l "@TYPE: s1-tddft-opt" templates/*           # By calculation type
-grep -l "@FUNCTIONAL: CAM-B3LYP" templates/*         # By functional
-grep "@VERIFIED" templates/* | grep -v "PENDING\|DEPRECATED\|FAILED"  # Only verified
-```
+A geometry may be optimized at a cheaper or different level than a final single-point energy. That is allowed. What is **not** allowed is silently subtracting incompatible absolute energies and calling the result an adiabatic gap, reorganization energy, reaction energy, or `E00`.
 
 ---
 
-## Principle 3: Manual-Driven Debugging
+# 2. ENERGY-CONSISTENCY GATE — hard stop
 
-### The Debugging Protocol
-When ORCA produces an error, follow this exact sequence:
+Before calculating or reporting any quantity formed from differences of absolute electronic energies, explicitly list every energy in the expression.
 
-1. **Read the exact error**: `tail -30 output.out` or `grep -i "error\|abort\|fatal" output.out`
-2. **Search the manual for the keyword**: `grep -r "<error keyword>" manual/orca_manual_kb/`
-3. **Find working examples in the manual**: Look for complete input blocks — they show correct syntax
-4. **Test with minimal system**: Create a 2-3 atom test input before running full molecule
-5. **Validate**: Run the test, confirm the fix, THEN run the full calculation
+## Required rule
 
-### Common Manual Search Patterns
-```bash
-# Find all files mentioning a topic
-grep -rl "internal conversion" manual/orca_manual_kb/
+The energies being subtracted must use the same energy-level Hamiltonian/model, including as applicable:
 
-# Find keyword syntax in context
-grep -B5 -A15 "ESD(IC)" manual/orca_manual_kb/<relevant_file>.md
+- electronic-structure method / response formalism,
+- functional,
+- basis set,
+- dispersion correction,
+- solvent model and solvent,
+- solvent equilibrium regime when it affects the state energy,
+- relativistic treatment,
+- frozen-core / PNO / correlation settings that materially define the energy,
+- charge and multiplicity.
 
-# Extract complete example inputs (invaluable for syntax)
-grep -B10 -A20 "xyzfile" manual/orca_manual_kb/<relevant_file>.md
+**Different geometry optimization levels are allowed; different energy levels inside the same energy difference are not.**
+
+If the gate fails:
+
+1. Do not report the derived quantity.
+2. Identify which energy legs are inconsistent.
+3. Propose consistent single-point calculations on the existing geometries.
+4. Rebuild the energy cycle only after those calculations finish.
+
+## Four-point photophysics cycle
+
+Let `R0` be the optimized S0 geometry and `R1` the optimized S1 geometry. Using one consistent final energy level:
+
+```text
+E0_R0 = S0 electronic energy at R0
+E1_R0 = S1 electronic energy at R0
+E0_R1 = S0 electronic energy at R1
+E1_R1 = S1 electronic energy at R1
 ```
 
-### The Manual IS the Authority
-- ORCA version-specific syntax differences are only documented in the manual
-- Example inputs in the manual have been tested by the developers
-- If the manual says a keyword exists and it doesn't work, check the ORCA version and changelog
+Then:
+
+```text
+E_abs = E1_R0 - E0_R0                  vertical absorption
+E_em  = E1_R1 - E0_R1                  vertical emission
+E_ad  = E1_R1 - E0_R0                  adiabatic electronic gap
+lambda_e = E1_R0 - E1_R1               excited-state relaxation
+lambda_g = E0_R1 - E0_R0               ground-state reorganization
+E00 = E_ad + (ZPE_S1_R1 - ZPE_S0_R0)   0-0 energy
+```
+
+Sanity checks for an ordinary two-surface relaxation picture:
+
+```text
+E_abs >= E_ad >= E_em
+E_abs - E_em = lambda_e + lambda_g
+lambda_e >= 0
+lambda_g >= 0
+```
+
+Small violations may arise from numerical noise or differing solvation conventions; large violations are a **hard warning** for mixed methods, wrong state, wrong geometry, wrong sign, or wrong energy extraction.
+
+Do not define `E00` as “vertical emission minus an assumed reorganization energy”. Do not infer a fluorescence-band interval by simply placing the experimental maximum between vertical emission and `E00`.
 
 ---
 
-## Principle 4: Minimal, Event-Driven Monitoring
+# 3. Controlled method comparisons
 
-### Philosophy: The Output File IS the Monitoring
-ORCA writes everything to `.out` files. Claude can read them on demand. The monitoring system's ONLY job is to answer three questions at process boundaries:
-1. **Is the job alive?** (process check — `kill -0`)
-2. **Did it crash?** (error pattern scan on output — infrequent)
-3. **Did it finish normally?** (grep for "ORCA TERMINATED NORMALLY")
+A method comparison is interpretable only when the compared calculations differ in the intended variable.
 
-Do NOT log per-iteration progress lines, last-line tails, SCF convergence steps, or geometry cycles during execution. These produce hundreds of log lines per job with zero diagnostic value for Claude Code. The output file already contains all of this.
+## Examples
 
-### run_orca Contract
-- **Log ONLY**: job start, job completion (SUCCESS/ERROR), and confirmed stalls
-- **Silent during execution**: check process liveness every 5 min, scan for fatal errors every 10 min
-- **On failure**: dump error context to `/tmp/orca_diag_PID.txt` (not N separate log lines)
-- **On success**: return 0, let the phase script extract data
+### TDA vs full TD-DFT
+Use the same:
 
-### Error Pattern Library
-Build the `ERROR_PATTERNS` array cumulatively — each new failure type enriches detection. Scan for these every 2nd check (10 min) to reduce I/O on large output files:
-```bash
-ERROR_PATTERNS=(
-    "INPUT ERROR"
-    "UNRECOGNIZED OR DUPLICATED KEYWORD"
-    "FATAL ERROR"
-    "segmentation fault"
-    "ORCA finished by error termination"
-    # Add new patterns as discovered
-)
+- geometry,
+- functional,
+- basis,
+- dispersion,
+- solvent and solvent regime,
+- numerical settings,
+- target state.
+
+Change only:
+
+```text
+%tddft
+  TDA true
+end
 ```
 
-### What NOT to Monitor
-- **Per-iteration progress**: Last SCF energy, current gradient, optimization cycle number — it's all in the `.out` file if needed
-- **Convergence plots**: Real-time matplotlib graphs of energy/gradient convergence — pure compute waste for Claude Code
-- **Full-file greps every check**: Scanning 100+ MB output files every few minutes for "Current Energy" patterns
-- **Email polling loops**: Polling `notify_orca.py` to send email on completion — use file-based completion checks instead
+versus
 
-### Diagnosis on Failure (write to file, not to log stream)
-```bash
-diagnose_error() {
-    log "=== ERROR DIAGNOSIS: $basename ==="
-    {
-        echo "--- Last 20 lines ---"
-        tail -20 "$outfile"
-        echo ""
-        echo "--- Error/warning context ---"
-        grep -i -B2 -A5 "error\|abort\|fatal" "$outfile" | tail -30
-    } > "/tmp/orca_diag_$$.txt"
-    log "Full diagnosis saved to /tmp/orca_diag_$$.txt"
-}
+```text
+%tddft
+  TDA false
+end
 ```
-Write error details to a temp file, and log only a pointer to it. Claude reads the file when debugging — the details don't need to be in the conversation log.
+
+ORCA 6.1 uses TDA as the default TD-DFT approximation; `TDA false` requests full TD-DFT. Never attribute a wavelength shift solely to TDA→full TD-DFT if the basis set or geometry changed at the same time.
+
+### Basis-set convergence
+Use one fixed geometry and one fixed electronic method. Compare, for example, `def2-SVPD` and `def2-TZVPD` as single points first. If the shift is unexpectedly large, investigate state identity and diffuse-orbital character before reoptimizing both surfaces.
+
+### Functional comparison
+Use the same geometry, basis, solvent settings, TDA/full-TDDFT choice, and target state. A “redder” result is not automatically better.
 
 ---
 
-## Principle 5: Resource Management
+# 4. Ground-state geometry and frequencies
 
-### Serial Job Queue (tsp)
-```bash
-tsp myorca mol1.inp    # Queue job 1
-tsp myorca mol2.inp    # Queued behind job 1 — runs when job 1 finishes
-```
-tsp enforces serial execution. No two ORCA jobs run simultaneously unless explicitly designed to.
+For every S0 minimum:
 
-### Parallel Displacement Execution (for numerical frequencies)
-ORCA 6.1 supports displacement-level parallelism via `nprocs_group`:
-```
-!PAL16(4x4)    # 16 total cores, 4 per displacement → 4 simultaneous displacements
-```
-Each displacement calculation is independent — near-linear speedup with group count.
+1. Confirm optimization convergence.
+2. Confirm the frequency calculation actually ran.
+3. Confirm zero meaningful imaginary frequencies for a minimum.
+4. Preserve `.xyz`, `.hess`, `.gbw`, and the output used to establish provenance.
 
-### Memory Budgeting
-```
-%maxcore N    # MB per displacement group (not per core)
-```
-With G groups: peak memory ≈ G × N MB. Check `free -h` before starting.
+Do not treat “frequency summary not found” as zero imaginary frequencies.
 
-### Disk Budgeting
-Numerical frequency output grows with displacement count: ~2 MB per displacement accumulated in the output file. For N atoms with central differences: 6N × 2 MB. Check `df -h` before starting.
+For very low-magnitude imaginary modes, inspect the mode before deciding whether it is numerical noise. Tightening optimization/grid settings or displacing along the mode may be necessary.
 
 ---
 
-## Principle 6: Email Notifications
+# 5. TD-DFT absorption and solvation
 
-### Why Notify?
-Long calculations (hours to days) don't require constant monitoring. Email notifications let you know when a phase completes or the entire cascade finishes.
+For vertical absorption in solvent, ORCA 6.1 LR-CPCM uses non-equilibrium solvation by default because excitation is fast relative to solvent nuclear reorganization.
 
-### Configuration
-Set environment variables before running phase scripts or autopilot:
-```bash
-export SMTP_PASS="your-auth-code"      # Required — SMTP authorization code
-export EMAIL_TO="you@example.com"      # Default: same as SMTP_USER
-export SMTP_HOST="smtp.163.com"        # Default: smtp.163.com
-export SMTP_PORT="465"                 # Default: 465 (SSL)
-export SMTP_USER="you@example.com"     # Default: same as EMAIL_TO
-```
+For excited-state geometry optimizations, frequencies, and ORCA_ESD, equilibrium solvation is the default when analytic gradients are requested / inside ESD.
 
-### SMTP Providers
-| Provider | SMTP_HOST | PORT | Auth Method |
-|----------|-----------|:---:|-------------|
-| 163.com | smtp.163.com | 465 | Authorization code (not login password) |
-| QQ Mail | smtp.qq.com | 465 | Authorization code |
-| Gmail | smtp.gmail.com | 587 | App password |
+Therefore record `CPCMEQ` behavior explicitly whenever comparing vertical and relaxed-state energies. Do not assume that identical `CPCM(Water)` text means identical solvent response in every stage.
 
-### Automatic Triggers
-- `phase3_esd.sh` calls `notify_summary "ESD(IC) Complete"` after both ESD jobs finish
-- `phase4_report.sh` calls `notify_summary "Cascade Complete"` after report generation
-- `notify_summary()` reads `cascade_status.json` and includes all key data in the email body
+For ICT states:
 
-### Email Format
-```
-Subject: [AutoORCA] ESD(IC) Complete — 05/11 15:30
-Body:
-  Phase: esd_done
-  MOL1:
-    s0_energy: -978.51
-    s1_energy_cm1: 19459.9
-    k_ic: 0.0495
-    ...
-  Working directory: /data/software/orca610/34qy
-```
+- prefer a range-separated functional as a candidate, but do not assume it is automatically accurate;
+- inspect NTOs / transition densities;
+- check basis-set sensitivity, especially diffuse functions;
+- consider higher-level references where tractable.
 
 ---
 
-## Recipe: Setting Up a New Cascade
+# 6. Excited-state optimization — state identity gate
 
-Apply this methodology to any multi-step calculation:
+A converged excited-state geometry is only valid for interpretation if the intended electronic state was followed.
 
-1. **Understand the chemistry**: What are the input molecules? What properties do you need?
-2. **Design the phases**: What calculations must precede what? What data flows between them?
-3. **Choose functional/basis**: Consult manual for method-specific limitations (gradient support, solvent compatibility)
-4. **Create templates**: Start empty — templates grow as calculations succeed
-5. **Write phase scripts**: One script per phase, all sourcing shared_functions.sh
-6. **Set up monitoring**: Initialize ERROR_PATTERNS with known failure signatures, write diagnose_error() that dumps to file
-7. **Budget resources**: Memory per job × concurrent jobs vs available RAM. Disk for output accumulation
-8. **Test one molecule first**: Run the full cascade on the simplest molecule before scaling up
-9. **Submit with tsp**: Single command, serial execution, auto-continuation
-10. **Accumulate templates**: After each success, curate the template with discovered knowledge
+## Minimum checks
+
+- request enough roots to cover nearby states;
+- inspect state composition at the start and end;
+- use NTOs when practical;
+- use `FOLLOWIROOT TRUE` when crossings/root flipping are plausible;
+- if the state changes character substantially, restart or redefine the target state instead of blindly continuing by root number.
+
+Recommended pattern:
+
+```text
+%tddft
+  NRoots        5
+  IRoot         1
+  FollowIRoot   true
+  DoNTO         true
+end
+```
+
+`FOLLOWIROOT` is a robustness tool, not proof that the state remained chemically meaningful. Confirm the final state character.
+
+## Excited-state frequency
+
+If an S1 minimum is used for `E00`, vibronic analysis, or an AH ESD calculation, perform an S1 frequency/Hessian calculation when feasible. ORCA 6.1 documentation shows excited-state `Opt Freq` workflows; the frequency step may require numerical differentiation and can be expensive.
+
+A normally terminated excited-state optimization is not sufficient evidence that the structure is a minimum.
 
 ---
 
-## Project Directory Structure
+# 7. Vertical emission
 
-```
-$ORCA_ROOT/                          # /data/software/orca610
-  ├── orca                           # ORCA binary
-  ├── manual/orca_manual_kb/         # ORCA 6.1 manual in markdown (shared, read-only)
-  ├── templates/                     # Verified calculation templates (shared, accumulates)
-  │   ├── s0_opt_freq_*.inp
-  │   ├── s1_tddft_opt_*.inp
-  │   └── esd_vg_ic_*.inp
-  ├── scripts/
-  │   └── shared_functions.sh        # run_orca, get_*, check_*, save_template, etc.
-  └── <project>/                     # One subdirectory per project
-      ├── MOL-1.inp                  # Input files
-      ├── MOL-1.out                  # Output files (generated)
-      ├── phase1_s0.sh               # Phase scripts (customize per project)
-      ├── phase2_s1.sh
-      ├── phase3_esd.sh
-      ├── autopilot.sh               # Chains all phases
-      └── cascade_status.json        # Shared state (auto-created)
-```
+Report vertical emission at the S1 geometry using an explicitly stated final electronic method.
 
-Shared resources (`manual/`, `templates/`, `scripts/`) live at `$ORCA_ROOT`.
-Project-specific files live in `$ORCA_ROOT/<project>/`.
+If the S1 geometry was optimized with TDA for stability but the final emission is reported with full TD-DFT, say so. This is a legitimate composite protocol provided the reported emission energy itself is computed consistently at the stated final level.
+
+If `FOLLOWIROOT` changed the numerical root index, do not automatically extract “root 1” as the target emission. Match by state character.
 
 ---
 
-## Quick Reference: ORCA 6.1 Manual Sections
+# 8. STEOM / DLPNO-STEOM as a high-level reference
 
-All paths relative to `$ORCA_ROOT/manual/orca_manual_kb/`:
+Use the phrase **high-level reference** rather than “gold standard” unless an external benchmark justifies stronger language.
 
-| Topic | Path |
-|-------|------|
-| Input file structure | `07_Essential_Calculation_Elements/01_general_structure_of_the_input_file.md` |
-| Parallel execution | `07_.../05_parallel_and_multi-process_runs.md` |
-| Dispersion corrections | `08_Model_Chemistries/04_dispersion_corrections.md` |
-| NumFreq / Hessian | `09_Structure_and_Reactivity/06_vibrational_frequencies.md` |
-| ESD (excited state dynamics) | `10_Spectroscopy_and_Properties/05_excited_state_dynamics.md` |
-| TD-DFT excited states | `10_.../06_excited_states_via_rpa_cis_td-dft_and_sf-tda.md` |
-| Compound jobs / automation | `13_Workflows_and_Automatization/` |
-| Change log (version diffs) | `16_Detailed_change_log/` |
-| Full index | `20_Index/01_content.md` |
+For STEOM-CCSD:
+
+- inspect `Percentage Active Character`;
+- ORCA 6.1 states that values above 98% are considered converged with respect to active space;
+- if below 98%, increase the relevant roots / active-space coverage and reassess;
+- a dominant HOMO→LUMO amplitude alone does not replace the active-character diagnostic.
+
+When using STEOM solvation:
+
+```text
+%mdci
+  DoSolv true
+end
+```
+
+is required for the CPCM/SMD perturbative solvation correction described by ORCA 6.1, and the manual labels this solvation treatment experimental. Record that limitation.
+
+When comparing a high-level state with a TD-DFT state, match **state composition**, not merely “S1”, “S2”, etc.
+
+---
+
+# 9. ORCA_ESD rules
+
+## Fluorescence
+
+Prefer `ESD(FLUOR)` when the goal is a vibronically resolved fluorescence rate/spectrum rather than converting one vertical oscillator strength into a full experimental quantum yield.
+
+ORCA_ESD can include Franck-Condon/Herzberg-Teller effects and, with CPCM, applies the documented refractive-index treatment to the fluorescence rate.
+
+## Internal conversion
+
+For `ESD(IC)` in ORCA 6.1:
+
+- provide the **ground-state geometry matching the ground-state Hessian**;
+- provide both ground-state and excited-state Hessians for an AH-style calculation;
+- use NACME (`nacme true`) and ETF (`etf true`);
+- the ORCA 6.1 manual recommends **full TD-DFT** (`TDA false`) for the NACME calculation;
+- do not silently replace a missing S1 Hessian with the S0 Hessian and call the result an exact AH IC calculation.
+
+Reference pattern:
+
+```text
+! CAM-B3LYP def2-SVP ESD(IC) CPCM(Methanol) TightSCF
+
+%tddft
+  TDA false
+  NRoots 5
+  IRoot 1
+  NACME true
+  ETF true
+end
+
+%esd
+  GSHessian "mol_S0.hess"
+  ESHessian "mol_S1.hess"
+  UseJ true
+end
+
+* xyzfile 0 1 mol_S0.xyz
+```
+
+If an approximate excited-state PES is required, generate and document that approximation explicitly. Never disguise an approximation as a computed S1 Hessian.
+
+---
+
+# 10. Radiative rates and quantum yield
+
+Do not report a general fluorescence quantum yield from only `k_r` and `k_IC` unless the two-channel assumption is explicitly stated.
+
+General kinetic expression:
+
+```text
+Phi_F = k_r / (k_r + k_IC + k_ISC + k_nr,other + ...)
+```
+
+If only `k_r` and `k_IC` are available, report:
+
+```text
+Phi_F(two-channel) = k_r / (k_r + k_IC)
+```
+
+and label it an approximation / upper-bound-like model, not a complete experimental quantum yield prediction.
+
+A radiative rate estimated from a vertical oscillator strength is also an approximation. Prefer ORCA_ESD fluorescence rates when vibronic effects matter.
+
+---
+
+# 11. Manual-driven debugging and version claims
+
+When ORCA fails:
+
+1. read the exact error and nearby warnings;
+2. search the ORCA 6.1 manual for the relevant module/keyword;
+3. check the detailed changelog;
+4. reproduce with a minimal test system if practical;
+5. only then promote a workaround into a reusable rule.
+
+Distinguish:
+
+```text
+Official limitation: documented by the manual/changelog.
+Local observation: reproducible in this exact ORCA build/environment.
+Hypothesis: plausible explanation not yet confirmed.
+```
+
+Do not convert a local crash into statements such as “B3LYP TD-DFT gradients are unsupported in ORCA 6.1” unless official documentation confirms that scope. ORCA 6.1 documents analytic TD-DFT gradients generally.
+
+---
+
+# 12. Template lifecycle
+
+A template is evidence that a syntax/protocol ran, not evidence that the method is universally appropriate.
+
+Required metadata:
+
+```text
+# @TYPE:
+# @FUNCTIONAL:
+# @BASIS:
+# @DISPERSION:
+# @SOLVENT:
+# @TDA:
+# @CHARGE:
+# @MULT:
+# @ORCA:
+# @SYSTEM:
+# @STATUS: VERIFIED / PENDING / DEPRECATED
+# @VERIFIED:
+```
+
+Rules:
+
+- never auto-label a template with hard-coded functional/basis/charge values that were not parsed or supplied;
+- never mark a calculation “verified” solely because ORCA terminated normally;
+- for optimization templates, require optimization convergence;
+- for minimum-geometry templates, require the intended frequency check;
+- preserve deprecated templates separately from active templates;
+- avoid duplicate filenames that differ only by hyphen/underscore conventions.
+
+---
+
+# 13. Resource management
+
+ORCA 6.1 `%MaxCore` is a memory limit **per processing core**, not per displacement group. A conservative rule is:
+
+```text
+MaxCore_MB * nprocs <= ~0.75 * available_RAM_MB
+```
+
+Allow margin because ORCA can exceed `%MaxCore` in some modules.
+
+For numerical frequencies/gradients, ORCA supports multi-process grouping through `%pal nprocs` + `nprocs_group` and convenience forms such as `PAL16(4x4)`.
+
+Do not hard-code one core count for every machine. Read it from project configuration / environment. Queue independent full jobs serially unless intentional concurrency is budgeted.
+
+---
+
+# 14. Phased cascade architecture
+
+A robust photophysics workflow may look like:
+
+```text
+Phase 0  structure preparation / conformer check
+Phase 1  S0 optimization + frequency
+Phase 2  vertical absorption at R0
+Phase 3  S1 optimization + state tracking
+Phase 4  S1 frequency/Hessian when needed
+Phase 5  vertical emission at R1
+Phase 6  consistent four-point energies / E00 if requested
+Phase 7  high-level reference calculations
+Phase 8  ESD fluorescence / IC / ISC where justified
+Phase 9  report with provenance and uncertainty
+```
+
+Not every project needs every phase. Add only calculations that answer the scientific question.
+
+At each review gate ask:
+
+```text
+Did ORCA finish?
+Did the intended optimization/frequency/state calculation finish?
+Is the state identity correct?
+Are the method fingerprints compatible for the quantity being derived?
+Are the units and signs plausible?
+Does a physical sanity check fail?
+```
+
+A failed scientific gate stops the cascade even when the software exit code is zero.
+
+---
+
+# 15. Reporting language
+
+Use calibrated conclusions.
+
+Prefer:
+
+```text
+"The tested TD-DFT protocols predict shorter wavelengths than the
+DLPNO-STEOM-CCSD high-level reference for this state."
+```
+
+Avoid:
+
+```text
+"TD-DFT is intrinsically wrong for this molecule."
+"The reddest method is the best method."
+"The high-level result proves the experimental maximum before a spectrum is measured."
+```
+
+When experiment is only visual color, say “qualitatively consistent with red emission”; do not claim quantitative wavelength agreement.
+
+---
+
+# 16. ORCA 6.1 manual anchors
+
+Use the installed/local manual when available. The most relevant official sections are:
+
+- 2.1.3 — Global Memory Use (`%MaxCore` per processing core)
+- 2.5 — Parallel and Multi-Process Runs
+- 4.6 — Vibrational Frequencies
+- 5.5 — Excited State Dynamics
+- 5.5.5 — Internal Conversion Rates
+- 5.5.7 — ESD with STEOM/EOM and higher-level methods
+- 5.6.6 — LR-CPCM equilibrium vs non-equilibrium conditions
+- 5.6.16 — Excited-State Geometry Optimization and `FOLLOWIROOT`
+- 5.10.4 — STEOM Percentage Active Character
+- 5.10.8 — STEOM solvation (`DoSolv`)
+- Appendix 1 — Detailed changelog
+
+Official online manual: `https://www.faccts.de/docs/orca/6.1/manual/`

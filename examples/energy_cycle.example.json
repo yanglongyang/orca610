@@ -1,0 +1,77 @@
+{
+  "energies": {
+    "E0_R0": {
+      "value_eh": -1000.000000,
+      "method": {
+        "method_family": "TD-DFT energy cycle",
+        "functional": "CAM-B3LYP",
+        "basis": "def2-SVPD",
+        "dispersion": "D3BJ",
+        "solvent_model": "CPCM",
+        "solvent": "Water",
+        "solvent_regime": "documented-consistent-cycle",
+        "relativistic": "none",
+        "charge": 0,
+        "multiplicity": 1,
+        "tda": null,
+        "excited_state_method": null
+      }
+    },
+    "E1_R0": {
+      "value_eh": -999.900000,
+      "method": {
+        "method_family": "TD-DFT energy cycle",
+        "functional": "CAM-B3LYP",
+        "basis": "def2-SVPD",
+        "dispersion": "D3BJ",
+        "solvent_model": "CPCM",
+        "solvent": "Water",
+        "solvent_regime": "documented-consistent-cycle",
+        "relativistic": "none",
+        "charge": 0,
+        "multiplicity": 1,
+        "tda": false,
+        "excited_state_method": "full TD-DFT"
+      }
+    },
+    "E0_R1": {
+      "value_eh": -999.990000,
+      "method": {
+        "method_family": "TD-DFT energy cycle",
+        "functional": "CAM-B3LYP",
+        "basis": "def2-SVPD",
+        "dispersion": "D3BJ",
+        "solvent_model": "CPCM",
+        "solvent": "Water",
+        "solvent_regime": "documented-consistent-cycle",
+        "relativistic": "none",
+        "charge": 0,
+        "multiplicity": 1,
+        "tda": null,
+        "excited_state_method": null
+      }
+    },
+    "E1_R1": {
+      "value_eh": -999.920000,
+      "method": {
+        "method_family": "TD-DFT energy cycle",
+        "functional": "CAM-B3LYP",
+        "basis": "def2-SVPD",
+        "dispersion": "D3BJ",
+        "solvent_model": "CPCM",
+        "solvent": "Water",
+        "solvent_regime": "documented-consistent-cycle",
+        "relativistic": "none",
+        "charge": 0,
+        "multiplicity": 1,
+        "tda": false,
+        "excited_state_method": "full TD-DFT"
+      }
+    }
+  },
+  "zpe": {
+    "S0_R0_eh": 0.200000,
+    "S1_R1_eh": 0.198000
+  },
+  "sanity_tolerance_ev": 0.01
+}
