@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.1.1
+version: 3.2.0
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -11,13 +11,14 @@ This skill automates **process without relaxing physical consistency**. A calcul
 ## Core principles
 
 1. **Scientific consistency before automation.** Never let a script combine quantities that are not physically comparable.
-2. **Record method provenance.** Every reported number must carry the electronic method, functional, basis, dispersion, solvent treatment, charge/multiplicity, excited-state formalism, geometry source, and ORCA version needed to interpret it.
-3. **Phase the work.** Use independent stages with review gates and restartability.
-4. **Track the electronic state, not only the root number.** `IROOT 1` is an ordering label, not a permanent state identity.
-5. **Controlled comparisons only.** When testing TDA vs full TD-DFT, basis sets, functionals, solvent models, etc., change one variable at a time unless explicitly performing a factorial comparison.
-6. **Use the ORCA manual as the syntax authority.** Treat local observations as local until confirmed by the manual/changelog.
-7. **Do not choose a method because it gives the expected answer.** Agreement with a desired color, wavelength, or literature value is evidence to evaluate, not a criterion for method selection.
-8. **Respect computational resources.** Parallelism, `%MaxCore`, scratch, and queueing must reflect the actual machine.
+2. **Human review before execution.** Every newly generated or modified ORCA input must be inspected and explicitly approved before it runs.
+3. **Record method provenance.** Every reported number must carry the electronic method, functional, basis, dispersion, solvent treatment, charge/multiplicity, excited-state formalism, geometry source, and ORCA version needed to interpret it.
+4. **Phase the work.** Use independent stages with review gates and restartability.
+5. **Track the electronic state, not only the root number.** `IROOT 1` is an ordering label, not a permanent state identity.
+6. **Controlled comparisons only.** When testing TDA vs full TD-DFT, basis sets, functionals, solvent models, etc., change one variable at a time unless explicitly performing a factorial comparison.
+7. **Use the ORCA manual as the syntax authority.** Treat local observations as local until confirmed by the manual/changelog.
+8. **Do not choose a method because it gives the expected answer.** Agreement with a desired color, wavelength, or literature value is evidence to evaluate, not a criterion for method selection.
+9. **Respect computational resources.** Parallelism, `%MaxCore`, scratch, and queueing must reflect the actual machine.
 
 ---
 
@@ -495,3 +496,23 @@ Hard rules:
 - Do not compare chemically different species' total electronic energies as reaction energies without a balanced thermochemical cycle.
 - Do not infer a mechanism from one descriptor; in particular, a HOMO-LUMO-gap shift alone cannot support it.
 - Flag likely conformer sensitivity when flexible substituents or D-pi-A torsions can change the spectrum; full ensemble photophysics is outside v3.1.
+
+---
+
+# 18. Mandatory pre-run review gate (v3.2)
+
+Read `references/pre_run_review.md` before generating or executing any ORCA input. Generation, validation, approval, and execution are separate actions:
+
+```text
+GENERATED -> REVIEW_REQUIRED -> APPROVED -> RUNNING -> COMPLETED
+```
+
+For every generated or modified `.inp`:
+
+1. Run `input_review.py review` and inspect its full raw input, semantic summary, SHA256, dependency manifest, and warnings.
+2. Explain important settings and unusual choices to the user.
+3. Wait for explicit approval of that exact displayed input/dependency set.
+4. Only then invoke `input_approve.py`; this action records `approved_by: human` and hash-bound approval.
+5. Rerun the phase or autopilot. `run_orca()` independently verifies approval immediately before launching ORCA.
+
+Never self-approve, infer approval from silence, or add an auto-approval/global-approval bypass. A verified template is not execution approval for a molecule-specific instance. Changes to an input or known external dependency (`xyzfile`, `moinp`, `GSHessian`, `ESHessian`) invalidate approval and require a new review.

@@ -32,6 +32,7 @@
 *.citations*
 *.vdw*
 *.grid*
+input_reviews.json
 
 # ORCA manual (large, copyrighted)
 manual/

@@ -1,8 +1,8 @@
-# AutoORCA 3.1.1 — Fluorescence Probe Analysis
+# AutoORCA 3.2.0 — Review-Gated Photophysics Workflows
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.1.1 builds a fluorescence-probe analysis layer on them: phase-specific probe/product provenance, energy-gated E00 comparison, NTO/ICT evidence, solvent-series validation, conservative TICT diagnostics, and evidence-ranked reports.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.2.0 adds a mandatory human pre-run review gate: every generated ORCA input and its external dependencies are hash-bound to an explicit approval before execution. The v3.1.1 fluorescence-probe analysis layer remains included.
 
 ## Repository layout
 
@@ -30,6 +30,8 @@ The 3.0 revision added scientific guardrails missing from the early version. Ver
 │   ├── solvent_series_report.py     # fixed-geometry vs solvent-relaxed gate
 │   ├── tict_scan_builder.py         # root-followed S1 dihedral scan input
 │   ├── fluorescence_probe_report.py # evidence-ranked Markdown + JSON report
+│   ├── input_review.py               # review summary + SHA256 dependency manifest
+│   └── input_approve.py              # records explicit human approval only
 │   └── autopilot.sh
 └── templates/
     ├── s0_opt_freq_camb3lyp_631gd.inp
@@ -92,6 +94,20 @@ export ORCA_VERSION=6.1.0
 # 5. Run
 AUTOORCA_WORKDIR="$PWD" bash /path/to/orca610/scripts/autopilot.sh
 ```
+
+## Mandatory pre-run review (v3.2)
+
+Newly generated inputs never start ORCA immediately. AutoORCA records `REVIEW_REQUIRED`, prints a semantic summary plus the complete raw input, and stops. After inspecting that exact input and explicitly deciding to run it, record the human approval:
+
+```bash
+python3 /path/to/orca610/scripts/input_review.py review MOL1_S0_OptFreq.inp
+# inspect the displayed complete raw input, settings, SHA256, and dependencies
+python3 /path/to/orca610/scripts/input_approve.py MOL1_S0_OptFreq.inp
+
+# rerun the phase/autopilot only after approval
+```
+
+Approval is bound to the input SHA256 and hashes for `xyzfile`, `moinp`, `GSHessian`, and `ESHessian` dependencies. Any edit invalidates approval and requires a new review. There is deliberately no global, silent, or auto-approval switch.
 
 ## Current cascade
 

@@ -15,9 +15,48 @@ export LD_LIBRARY_PATH="$ORCA_ROOT:${LD_LIBRARY_PATH:-}"
 WORKDIR="${AUTOORCA_WORKDIR:-$PWD}"
 WORKDIR="$(realpath "$WORKDIR")"
 STATUS_FILE="${STATUS_FILE:-$WORKDIR/cascade_status.json}"
+INPUT_REVIEW_FILE="${INPUT_REVIEW_FILE:-$WORKDIR/input_reviews.json}"
+SHARED_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INPUT_REVIEW_TOOL="${INPUT_REVIEW_TOOL:-$SHARED_SCRIPT_DIR/input_review.py}"
 cd "$WORKDIR" || exit 1
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+
+#------------------------------------------------------------------------------
+# Mandatory human pre-run review gate
+#------------------------------------------------------------------------------
+register_input_for_review() {
+    local input=$1 calculation_type=${2:-"unspecified"}
+    AUTOORCA_ALLOW_MIXED_HESSIANS="${ALLOW_MIXED_HESSIANS:-false}" \
+        python3 "$INPUT_REVIEW_TOOL" review "$input" --manifest "$INPUT_REVIEW_FILE" --calculation-type "$calculation_type"
+}
+
+require_input_approval() {
+    local input=$1 rc
+    if python3 "$INPUT_REVIEW_TOOL" require "$input" --manifest "$INPUT_REVIEW_FILE"; then
+        return 0
+    else
+        rc=$?
+        log "[REVIEW-GATE] EXECUTION REFUSED: $input is not approved for its current input/dependency hashes"
+        return "$rc"
+    fi
+}
+
+mark_input_lifecycle() {
+    local input=$1 lifecycle=$2 command rc
+    case "$lifecycle" in
+        RUNNING) command="mark-running" ;;
+        COMPLETED) command="mark-completed" ;;
+        *) log "[REVIEW-GATE] unsupported lifecycle state: $lifecycle"; return 2 ;;
+    esac
+    if python3 "$INPUT_REVIEW_TOOL" "$command" "$input" --manifest "$INPUT_REVIEW_FILE"; then
+        return 0
+    else
+        rc=$?
+        log "[REVIEW-GATE] unable to record lifecycle state $lifecycle for $input"
+        return "$rc"
+    fi
+}
 
 slugify() {
     printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g'
@@ -229,6 +268,11 @@ run_orca() {
         return 0
     fi
 
+    # Final safety boundary: every actual ORCA launch must hold a human
+    # approval bound to the current input and external dependency hashes.
+    require_input_approval "$input" || return $?
+    mark_input_lifecycle "$input" "RUNNING" || return $?
+
     if [ -f "$outfile" ]; then
         log "Removing stale/failed output: $outfile"
         rm -f "$outfile"
@@ -274,6 +318,7 @@ run_orca() {
 
     wait "$orca_pid" 2>/dev/null || true
     if orca_done "$outfile"; then
+        mark_input_lifecycle "$input" "COMPLETED" || return $?
         log "SUCCESS: $basename completed normally"
         return 0
     fi

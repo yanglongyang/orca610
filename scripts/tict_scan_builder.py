@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from input_review import ReviewError, _render, review
+
 
 class TictInputError(ValueError):
     pass
@@ -74,7 +76,7 @@ def build_input(config: dict) -> str:
     ntothresh = method.get("nto_threshold", "1e-4")
     start, end, steps = scan["start_deg"], scan["end_deg"], scan["n_steps"]
     return "\n".join((
-        "# AutoORCA v3.1 TICT diagnostic: inspect state identity/NTOs at every scan point.",
+        "# AutoORCA v3.2 TICT diagnostic: inspect state identity/NTOs at every scan point.",
         f"! Opt {method['functional']} RIJCOSX {method['basis']} {method['dispersion']} {method['solvent']} TightScf",
         "%geom",
         "  Scan D " + " ".join(map(str, atoms)) + f" = {start}, {end}, {steps} end",
@@ -88,7 +90,7 @@ def build_input(config: dict) -> str:
         f"  ntostates {ntostates}",
         f"  ntothresh {ntothresh}",
         "end",
-        f"* xyzfile {config['charge']} {config['multiplicity']} {config['xyz']}",
+        f"* xyzfile {config['charge']} {config['multiplicity']} \"{config['xyz']}\"",
         "",
     ))
 
@@ -99,8 +101,15 @@ def main(config_path: str, output_path: str) -> None:
     except (OSError, json.JSONDecodeError, TictInputError) as exc:
         print(f"[TICT] ERROR: {exc}", file=sys.stderr)
         raise SystemExit(2)
-    Path(output_path).write_text(output)
-    print(f"Wrote {output_path}")
+    path = Path(output_path)
+    path.write_text(output)
+    try:
+        record = review(path, path.parent / "input_reviews.json", "tict_scan")
+    except ReviewError as exc:
+        print(f"[TICT] ERROR: unable to register pre-run review: {exc}", file=sys.stderr)
+        raise SystemExit(2)
+    print(_render(record))
+    print(f"Wrote {output_path} — REVIEW_REQUIRED; no ORCA job was started.")
 
 
 if __name__ == "__main__":

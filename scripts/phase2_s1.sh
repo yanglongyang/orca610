@@ -44,11 +44,14 @@ PYEOF
             echo "end"
             echo "* xyz ${CHARGE} ${MULT}"
             tail -n +3 "$s0_xyz"
-            echo "*"
+            printf '\n*\n'
         } > "$opt_inp"
+        register_input_for_review "$opt_inp" "s1_optfreq" || exit 1
+        log "Generated $opt_inp — REVIEW_REQUIRED. No ORCA job was started; inspect the complete review and explicitly approve this exact input."
+        exit 3
     fi
 
-    run_orca "$opt_inp" || exit 1
+    run_orca "$opt_inp" || { rc=$?; exit "$rc"; }
     check_opt_converged "$opt_out" || { log "FATAL: S1 optimization convergence not confirmed for $mol"; exit 1; }
 
     set +e
@@ -94,10 +97,13 @@ PYEOF
             echo "end"
             echo "* xyz ${CHARGE} ${MULT}"
             tail -n +3 "$s1_xyz"
-            echo "*"
+            printf '\n*\n'
         } > "$em_inp"
+        register_input_for_review "$em_inp" "vertical_emission" || exit 1
+        log "Generated $em_inp — REVIEW_REQUIRED. No ORCA job was started; inspect the complete review and explicitly approve this exact input."
+        exit 3
     fi
-    run_orca "$em_inp" || exit 1
+    run_orca "$em_inp" || { rc=$?; exit "$rc"; }
 
     read -r e_em f_osc <<< "$(get_tddft_emission "$em_out" "$final_root")"
     [ "$e_em" != "0" ] || { log "FATAL: failed to extract target-state emission energy; inspect state identity manually"; exit 1; }

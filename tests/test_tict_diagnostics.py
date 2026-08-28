@@ -1,4 +1,8 @@
+import contextlib
+import io
+import json
 import sys
+import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -50,6 +54,24 @@ class TictDiagnosticsTests(unittest.TestCase):
                 "scan": {"start_deg": 0, "end_deg": 90, "n_steps": 10},
                 "method": {"functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent": "CPCM(Water)", "nroots": 5, "iroot": 1, "tda": False},
             })
+
+    def test_scan_builder_registers_review_required_input(self):
+        config = {
+            "xyz": str(ROOT / "examples" / "probe_S1.xyz"), "charge": 0, "multiplicity": 1,
+            "atom_index_base": 1, "dihedral": [1, 2, 5, 6],
+            "scan": {"start_deg": 0, "end_deg": 90, "n_steps": 10},
+            "method": {"functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent": "CPCM(Water)", "nroots": 5, "iroot": 1, "tda": False},
+        }
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp)
+            config_path, output_path = work / "scan.json", work / "scan.inp"
+            config_path.write_text(json.dumps(config))
+            with contextlib.redirect_stdout(io.StringIO()):
+                tict.main(str(config_path), str(output_path))
+            manifest = json.loads((work / "input_reviews.json").read_text())
+            record = manifest["inputs"][str(output_path.resolve())]
+            self.assertEqual(record["status"], "REVIEW_REQUIRED")
+            self.assertTrue(record["dependencies"][0]["exists"])
 
     def test_homo_lumo_gap_alone_is_not_supported_mechanism(self):
         verdict = report.classify_mechanism([

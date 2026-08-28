@@ -30,11 +30,16 @@ for mol in "${MOLECULES[@]}"; do
             echo "%pal nprocs ${NPROCS} end"
             echo "* xyz ${CHARGE} ${MULT}"
             tail -n +3 "$initial_xyz"
-            echo "*"
+            # Ensure the inline geometry terminator is on its own line even if
+            # a user-supplied XYZ file lacks a trailing newline.
+            printf '\n*\n'
         } > "$inp"
+        register_input_for_review "$inp" "s0_optfreq" || exit 1
+        log "Generated $inp — REVIEW_REQUIRED. No ORCA job was started; inspect the complete review and explicitly approve this exact input."
+        exit 3
     fi
 
-    run_orca "$inp" || exit 1
+    run_orca "$inp" || { rc=$?; exit "$rc"; }
 
     if ! check_opt_converged "$out"; then
         log "FATAL: $mol ORCA terminated but S0 optimization convergence was not confirmed"

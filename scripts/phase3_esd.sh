@@ -51,11 +51,14 @@ PYEOF
             echo "* xyz ${CHARGE} ${MULT}"
             # IMPORTANT: ORCA 6.1 ESD input geometry must match GSHESSIAN.
             tail -n +3 "$s0_xyz"
-            echo "*"
+            printf '\n*\n'
         } > "$inp"
+        register_input_for_review "$inp" "esd_ic" || exit 1
+        log "Generated $inp — REVIEW_REQUIRED. No ORCA job was started; inspect the complete review and explicitly approve this exact input."
+        exit 3
     fi
 
-    run_orca "$inp" || exit 1
+    run_orca "$inp" || { rc=$?; exit "$rc"; }
     k_ic=$(get_k_ic "$out")
     [[ "$k_ic" =~ ^[+]?[0-9]*\.?[0-9]+([Ee][-+]?[0-9]+)?$ ]] || { log "FATAL: failed to extract non-negative k_IC"; exit 1; }
     update_status --phase "esd_running" --mol "$mol" k_ic "$k_ic"
