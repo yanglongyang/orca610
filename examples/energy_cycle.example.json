@@ -3,7 +3,7 @@
     "E0_R0": {
       "value_eh": -1000.000000,
       "method": {
-        "method_family": "TD-DFT energy cycle",
+        "method_family": "DFT",
         "functional": "CAM-B3LYP",
         "basis": "def2-SVPD",
         "dispersion": "D3BJ",
@@ -20,7 +20,7 @@
     "E1_R0": {
       "value_eh": -999.900000,
       "method": {
-        "method_family": "TD-DFT energy cycle",
+        "method_family": "TD-DFT",
         "functional": "CAM-B3LYP",
         "basis": "def2-SVPD",
         "dispersion": "D3BJ",
@@ -37,7 +37,7 @@
     "E0_R1": {
       "value_eh": -999.990000,
       "method": {
-        "method_family": "TD-DFT energy cycle",
+        "method_family": "DFT",
         "functional": "CAM-B3LYP",
         "basis": "def2-SVPD",
         "dispersion": "D3BJ",
@@ -54,7 +54,7 @@
     "E1_R1": {
       "value_eh": -999.920000,
       "method": {
-        "method_family": "TD-DFT energy cycle",
+        "method_family": "TD-DFT",
         "functional": "CAM-B3LYP",
         "basis": "def2-SVPD",
         "dispersion": "D3BJ",

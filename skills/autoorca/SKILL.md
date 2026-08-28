@@ -53,9 +53,8 @@ Before calculating or reporting any quantity formed from differences of absolute
 
 ## Required rule
 
-The energies being subtracted must use the same energy-level Hamiltonian/model, including as applicable:
+The energies being subtracted must share the same underlying model settings, including as applicable:
 
-- electronic-structure method / response formalism,
 - functional,
 - basis set,
 - dispersion correction,
@@ -65,7 +64,9 @@ The energies being subtracted must use the same energy-level Hamiltonian/model, 
 - frozen-core / PNO / correlation settings that materially define the energy,
 - charge and multiplicity.
 
-**Different geometry optimization levels are allowed; different energy levels inside the same energy difference are not.**
+For an S0/S1 cycle, state-specific formalisms are expected: the two S0 legs may be `DFT`, while the two S1 legs may be `TD-DFT` (or another explicitly recorded excited-state method). Do not require those `method_family` labels to be identical across states. Instead, require the S0 pair to match each other, the S1 pair to match each other (including TDA/response formalism), and all four legs to share the listed underlying settings.
+
+**Different geometry optimization levels are allowed; incompatible shared model settings inside the same energy difference are not.**
 
 If the gate fails:
 

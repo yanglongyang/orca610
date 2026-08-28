@@ -11,6 +11,8 @@ For geometries R0 (S0 minimum) and R1 (S1 minimum), construct all final energies
 - E0(R1)
 - E1(R1)
 
+All four legs must share functional, basis, dispersion, solvent model/regime, relativistic treatment, charge, and multiplicity. Check `method_family` within each state pair: E0(R0)/E0(R1) can both be DFT while E1(R0)/E1(R1) can both be TD-DFT. For the excited-state pair, also keep the response formalism and TDA setting identical.
+
 Derived quantities:
 
 - Eabs = E1(R0) - E0(R0)

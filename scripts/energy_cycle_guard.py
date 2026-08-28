@@ -14,8 +14,7 @@ EH_TO_EV = 27.211386245988
 EV_NM = 1239.8419843320026
 
 REQUIRED_POINTS = ("E0_R0", "E1_R0", "E0_R1", "E1_R1")
-FINGERPRINT_KEYS = (
-    "method_family",
+SHARED_FINGERPRINT_KEYS = (
     "functional",
     "basis",
     "dispersion",
@@ -26,6 +25,8 @@ FINGERPRINT_KEYS = (
     "charge",
     "multiplicity",
 )
+GROUND_STATE_KEYS = ("method_family",)
+EXCITED_STATE_KEYS = ("method_family", "tda", "excited_state_method")
 
 
 def fail(msg: str, code: int = 2) -> None:
@@ -34,22 +35,44 @@ def fail(msg: str, code: int = 2) -> None:
 
 
 def method_diff(points: dict) -> list[str]:
-    ref = points[REQUIRED_POINTS[0]].get("method", {})
     issues: list[str] = []
+    methods = {name: points[name].get("method", {}) for name in REQUIRED_POINTS}
+
+    # Every shared descriptor must be stated on every leg.  Merely having the
+    # same omitted value would otherwise be incorrectly accepted as consistency.
+    for name, method in methods.items():
+        for key in SHARED_FINGERPRINT_KEYS:
+            if method.get(key) in (None, ""):
+                issues.append(f"{name} lacks shared fingerprint field {key!r}")
+
+    ref = methods["E0_R0"]
     for name in REQUIRED_POINTS[1:]:
-        cur = points[name].get("method", {})
-        for key in FINGERPRINT_KEYS:
+        cur = methods[name]
+        for key in SHARED_FINGERPRINT_KEYS:
             if ref.get(key) != cur.get(key):
                 issues.append(
                     f"{key}: {REQUIRED_POINTS[0]}={ref.get(key)!r}, {name}={cur.get(key)!r}"
                 )
-    # TDA/response formalism may be represented as None for pure ground-state
-    # total energies. If present for excited-state energy legs, compare those legs.
-    e1a = points["E1_R0"].get("method", {})
-    e1b = points["E1_R1"].get("method", {})
-    for key in ("tda", "excited_state_method"):
-        if e1a.get(key) != e1b.get(key):
-            issues.append(f"{key}: E1_R0={e1a.get(key)!r}, E1_R1={e1b.get(key)!r}")
+
+    # DFT is the normal method family for S0 legs and TD-DFT for S1 legs.  They
+    # must be internally consistent by state, but must not be forced equal
+    # across states merely because their energies are combined in one cycle.
+    for first, second, keys, label in (
+        ("E0_R0", "E0_R1", GROUND_STATE_KEYS, "ground-state"),
+        ("E1_R0", "E1_R1", EXCITED_STATE_KEYS, "excited-state"),
+    ):
+        for key in keys:
+            first_value = methods[first].get(key)
+            second_value = methods[second].get(key)
+            if first_value in (None, "") or second_value in (None, ""):
+                issues.append(
+                    f"{label} pair lacks required field {key!r}: "
+                    f"{first}={first_value!r}, {second}={second_value!r}"
+                )
+            elif first_value != second_value:
+                issues.append(
+                    f"{label} {key}: {first}={first_value!r}, {second}={second_value!r}"
+                )
     return issues
 
 
