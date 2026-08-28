@@ -109,6 +109,8 @@ python3 /path/to/orca610/scripts/input_approve.py MOL1_S0_OptFreq.inp
 
 Approval is bound to the input SHA256 and hashes for `xyzfile`, `moinp`, `GSHessian`, and `ESHessian` dependencies. Any edit invalidates approval and requires a new review. There is deliberately no global, silent, or auto-approval switch.
 
+The gate is checked before an existing ORCA job or completed `.out` is trusted. Historical outputs with no v3.2 review are labelled `IMPORTED_UNREVIEWED`; reviewing them now permits transparent use, but never retroactively claims pre-run approval. For standalone TICT generation outside `$AUTOORCA_WORKDIR`, pass `--manifest "$INPUT_REVIEW_FILE"` (or export that variable) so it shares the workflow manifest.
+
 ## Current cascade
 
 ```text

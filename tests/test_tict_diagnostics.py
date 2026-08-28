@@ -65,10 +65,11 @@ class TictDiagnosticsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             work = Path(temp)
             config_path, output_path = work / "scan.json", work / "scan.inp"
+            manifest_path = work / "workflow" / "input_reviews.json"
             config_path.write_text(json.dumps(config))
             with contextlib.redirect_stdout(io.StringIO()):
-                tict.main(str(config_path), str(output_path))
-            manifest = json.loads((work / "input_reviews.json").read_text())
+                tict.main(str(config_path), str(output_path), str(manifest_path))
+            manifest = json.loads(manifest_path.read_text())
             record = manifest["inputs"][str(output_path.resolve())]
             self.assertEqual(record["status"], "REVIEW_REQUIRED")
             self.assertTrue(record["dependencies"][0]["exists"])

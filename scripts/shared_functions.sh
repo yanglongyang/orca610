@@ -16,6 +16,7 @@ WORKDIR="${AUTOORCA_WORKDIR:-$PWD}"
 WORKDIR="$(realpath "$WORKDIR")"
 STATUS_FILE="${STATUS_FILE:-$WORKDIR/cascade_status.json}"
 INPUT_REVIEW_FILE="${INPUT_REVIEW_FILE:-$WORKDIR/input_reviews.json}"
+export INPUT_REVIEW_FILE
 SHARED_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_REVIEW_TOOL="${INPUT_REVIEW_TOOL:-$SHARED_SCRIPT_DIR/input_review.py}"
 cd "$WORKDIR" || exit 1
@@ -32,8 +33,14 @@ register_input_for_review() {
 }
 
 require_input_approval() {
-    local input=$1 rc
-    if python3 "$INPUT_REVIEW_TOOL" require "$input" --manifest "$INPUT_REVIEW_FILE"; then
+    local input=$1 outfile=${2:-} rc
+    local -a review_args=(require "$input" --manifest "$INPUT_REVIEW_FILE")
+    # A completed output predating this review manifest is an imported result:
+    # it may be reviewed now, but the record must never imply pre-run approval.
+    if [ -n "$outfile" ] && orca_done "$outfile"; then
+        review_args+=(--existing-completed-output)
+    fi
+    if python3 "$INPUT_REVIEW_TOOL" "${review_args[@]}"; then
         return 0
     else
         rc=$?
@@ -257,6 +264,10 @@ run_orca() {
     local basename="${input%.inp}"
     local outfile="${basename}.out"
 
+    # This is deliberately before wait_for_job()/orca_done(): AutoORCA must
+    # not trust or post-process a historical completed output without review.
+    require_input_approval "$input" "$outfile" || return $?
+
     if [ ! -x "$MYORCA" ]; then
         log "ERROR: MYORCA wrapper is not executable: $MYORCA"
         return 1
@@ -268,9 +279,6 @@ run_orca() {
         return 0
     fi
 
-    # Final safety boundary: every actual ORCA launch must hold a human
-    # approval bound to the current input and external dependency hashes.
-    require_input_approval "$input" || return $?
     mark_input_lifecycle "$input" "RUNNING" || return $?
 
     if [ -f "$outfile" ]; then

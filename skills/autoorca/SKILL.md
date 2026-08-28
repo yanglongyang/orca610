@@ -515,4 +515,4 @@ For every generated or modified `.inp`:
 4. Only then invoke `input_approve.py`; this action records `approved_by: human` and hash-bound approval.
 5. Rerun the phase or autopilot. `run_orca()` independently verifies approval immediately before launching ORCA.
 
-Never self-approve, infer approval from silence, or add an auto-approval/global-approval bypass. A verified template is not execution approval for a molecule-specific instance. Changes to an input or known external dependency (`xyzfile`, `moinp`, `GSHessian`, `ESHessian`) invalidate approval and require a new review.
+Never self-approve, infer approval from silence, or add an auto-approval/global-approval bypass. A verified template is not execution approval for a molecule-specific instance. Changes to an input or known external dependency (`xyzfile`, `moinp`, `GSHessian`, `ESHessian`) invalidate approval and require a new review. Existing completed outputs with no review record are `IMPORTED_UNREVIEWED`: review can authorize their transparent use, but never retroactively prove pre-run approval.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -95,7 +96,7 @@ def build_input(config: dict) -> str:
     ))
 
 
-def main(config_path: str, output_path: str) -> None:
+def main(config_path: str, output_path: str, manifest_path: str | None = None) -> None:
     try:
         output = build_input(json.loads(Path(config_path).read_text()))
     except (OSError, json.JSONDecodeError, TictInputError) as exc:
@@ -104,7 +105,8 @@ def main(config_path: str, output_path: str) -> None:
     path = Path(output_path)
     path.write_text(output)
     try:
-        record = review(path, path.parent / "input_reviews.json", "tict_scan")
+        manifest = Path(manifest_path or os.environ.get("INPUT_REVIEW_FILE", path.parent / "input_reviews.json"))
+        record = review(path, manifest, "tict_scan")
     except ReviewError as exc:
         print(f"[TICT] ERROR: unable to register pre-run review: {exc}", file=sys.stderr)
         raise SystemExit(2)
@@ -113,7 +115,11 @@ def main(config_path: str, output_path: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print(f"Usage: {Path(sys.argv[0]).name} scan_config.json output.inp", file=sys.stderr)
-        raise SystemExit(2)
-    main(sys.argv[1], sys.argv[2])
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("config")
+    parser.add_argument("output")
+    parser.add_argument("--manifest", help="use the workflow's INPUT_REVIEW_FILE")
+    args = parser.parse_args()
+    main(args.config, args.output, args.manifest)

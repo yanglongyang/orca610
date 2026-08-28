@@ -256,12 +256,14 @@ def _render(record: dict, include_raw: bool = True) -> str:
     lines += [f"Input SHA256: {record['input_sha256']}", "Dependencies:"]
     lines += [f"  - {dep['kind']}: {dep['reference']} | sha256={dep['sha256']} | exists={dep['exists']}" for dep in record["dependencies"]] or ["  - none"]
     lines += ["Warnings:"] + [f"  - {item}" for item in record["warnings"]] if record["warnings"] else ["Warnings: none"]
+    if record.get("execution_provenance") == "IMPORTED_UNREVIEWED":
+        lines.append("Execution provenance: IMPORTED_UNREVIEWED — this review cannot establish that approval existed before the completed run.")
     if include_raw:
         lines += ["", "--- COMPLETE RAW INPUT ---", record["input_text"], "--- END RAW INPUT ---"]
     return "\n".join(lines)
 
 
-def review(input_path: Path, manifest_path: Path, calculation_type: str | None) -> dict:
+def review(input_path: Path, manifest_path: Path, calculation_type: str | None, existing_completed_output: bool = False) -> dict:
     current = snapshot(input_path, calculation_type)
     manifest = load_manifest(manifest_path)
     current["warnings"].extend(protocol_warnings(manifest, current))
@@ -274,19 +276,22 @@ def review(input_path: Path, manifest_path: Path, calculation_type: str | None) 
         diff = "".join(difflib.unified_diff(previous.get("input_text", "").splitlines(True), current["input_text"].splitlines(True), fromfile="previous reviewed input", tofile="current input"))
         history.append({"status": "INVALIDATED", "at": now(), "reason": "input or dependency hash changed", "diff": diff})
     record = {**current, "status": "REVIEW_REQUIRED", "reviewed_at": now(), "calculation_type": calculation_type, "history": history}
+    if existing_completed_output:
+        record["execution_provenance"] = "IMPORTED_UNREVIEWED"
+        record["import_note"] = "A completed output existed before this v3.2 review record; approval is review-for-use, not evidence of pre-run approval."
     manifest["inputs"][key] = record
     save_manifest(manifest_path, manifest)
     return record
 
 
-def require(input_path: Path, manifest_path: Path) -> dict:
+def require(input_path: Path, manifest_path: Path, existing_completed_output: bool = False) -> dict:
     manifest = load_manifest(manifest_path)
     key = str(input_path.resolve())
     previous = manifest["inputs"].get(key)
     current = snapshot(input_path, previous.get("calculation_type") if previous else None)
     if previous and previous.get("status") in {"APPROVED", "COMPLETED"} and same_snapshot(previous, current):
         return previous
-    record = review(input_path, manifest_path, previous.get("calculation_type") if previous else None)
+    record = review(input_path, manifest_path, previous.get("calculation_type") if previous else None, existing_completed_output)
     raise ReviewError(_render(record))
 
 
@@ -331,13 +336,14 @@ def main() -> None:
     parser.add_argument("input")
     parser.add_argument("--manifest", default="input_reviews.json")
     parser.add_argument("--calculation-type")
+    parser.add_argument("--existing-completed-output", action="store_true", help="record an existing completed output as imported rather than pre-approved")
     args = parser.parse_args()
     try:
         path, manifest = Path(args.input), Path(args.manifest)
         if args.command == "review":
-            print(_render(review(path, manifest, args.calculation_type)))
+            print(_render(review(path, manifest, args.calculation_type, args.existing_completed_output)))
         elif args.command == "require":
-            record = require(path, manifest)
+            record = require(path, manifest, args.existing_completed_output)
             print(f"[REVIEW-GATE] APPROVAL VERIFIED: {record['input_path']}")
         elif args.command == "reject":
             record = reject(path, manifest)

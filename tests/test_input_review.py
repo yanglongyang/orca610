@@ -49,6 +49,12 @@ class InputReviewTests(unittest.TestCase):
         with self.assertRaises(input_review.ReviewError):
             input_review.require(self.input, self.manifest)
 
+    def test_historical_completed_output_is_marked_imported_not_preapproved(self):
+        record = input_review.review(self.input, self.manifest, "vertical_absorption", existing_completed_output=True)
+        self.assertEqual(record["status"], "REVIEW_REQUIRED")
+        self.assertEqual(record["execution_provenance"], "IMPORTED_UNREVIEWED")
+        self.assertIn("IMPORTED_UNREVIEWED", input_review._render(record))
+
     def test_approved_input_records_running_then_completed(self):
         self._review_and_approve()
         running = input_review.mark_state(self.input, self.manifest, "RUNNING")
