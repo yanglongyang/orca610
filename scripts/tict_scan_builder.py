@@ -30,28 +30,49 @@ def classify_tict(evidence: dict) -> str:
     return "TICT_UNRESOLVED"
 
 
+def xyz_atom_count(path: str) -> int:
+    try:
+        first_line = next(line for line in Path(path).read_text().splitlines() if line.strip())
+        count = int(first_line.strip())
+    except (OSError, StopIteration, ValueError) as exc:
+        raise TictInputError(f"cannot read XYZ atom count from {path!r}") from exc
+    if count < 4:
+        raise TictInputError("XYZ must contain at least four atoms for a dihedral scan")
+    return count
+
+
 def build_input(config: dict) -> str:
-    required = ("xyz", "charge", "multiplicity", "dihedral", "range_deg", "method")
+    required = ("xyz", "charge", "multiplicity", "dihedral", "scan", "method")
     missing = [key for key in required if config.get(key) in (None, "")]
     if missing:
         raise TictInputError("missing fields: " + ", ".join(missing))
     dihedral = config["dihedral"]
-    interval = config["range_deg"]
-    if len(dihedral) != 4 or len(interval) != 3:
-        raise TictInputError("dihedral needs four atoms and range_deg needs start, end, steps")
+    scan = config["scan"]
+    if len(dihedral) != 4 or not isinstance(scan, dict):
+        raise TictInputError("dihedral needs four atoms and scan must be an object")
+    for key in ("start_deg", "end_deg", "n_steps"):
+        if scan.get(key) in (None, ""):
+            raise TictInputError(f"scan lacks {key}")
+    if int(scan["n_steps"]) < 1:
+        raise TictInputError("scan.n_steps must be at least one")
     base = int(config.get("atom_index_base", 1))
     if base not in (0, 1):
         raise TictInputError("atom_index_base must be 0 or 1")
     atoms = [int(atom) - base for atom in dihedral]
     if min(atoms) < 0:
         raise TictInputError("atom indices are invalid for atom_index_base")
+    atom_count = xyz_atom_count(config["xyz"])
+    if max(atoms) >= atom_count:
+        raise TictInputError(
+            f"dihedral atom index {max(atoms) + base} exceeds XYZ atom count {atom_count}"
+        )
     method = config["method"]
     for key in ("functional", "basis", "dispersion", "solvent", "nroots", "iroot", "tda"):
         if method.get(key) in (None, ""):
             raise TictInputError(f"method lacks {key}")
     ntostates = method.get("nto_states", method["iroot"])
     ntothresh = method.get("nto_threshold", "1e-4")
-    start, end, steps = interval
+    start, end, steps = scan["start_deg"], scan["end_deg"], scan["n_steps"]
     return "\n".join((
         "# AutoORCA v3.1 TICT diagnostic: inspect state identity/NTOs at every scan point.",
         f"! Opt {method['functional']} RIJCOSX {method['basis']} {method['dispersion']} {method['solvent']} TightScf",

@@ -30,9 +30,9 @@ class TictDiagnosticsTests(unittest.TestCase):
 
     def test_scan_builder_uses_zero_based_orca_dihedral_indices(self):
         text = tict.build_input({
-            "xyz": "probe.xyz", "charge": 0, "multiplicity": 1,
+            "xyz": str(ROOT / "examples" / "probe_S1.xyz"), "charge": 0, "multiplicity": 1,
             "atom_index_base": 1, "dihedral": [1, 2, 5, 6],
-            "range_deg": [0, 90, 10],
+            "scan": {"start_deg": 0, "end_deg": 90, "n_steps": 10},
             "method": {
                 "functional": "CAM-B3LYP", "basis": "def2-SVPD",
                 "dispersion": "D3BJ", "solvent": "CPCM(Water)",
@@ -42,11 +42,34 @@ class TictDiagnosticsTests(unittest.TestCase):
         self.assertIn("Scan D 0 1 4 5 = 0, 90, 10 end", text)
         self.assertIn("donto true", text)
 
+    def test_scan_builder_rejects_an_atom_outside_xyz(self):
+        with self.assertRaises(tict.TictInputError):
+            tict.build_input({
+                "xyz": str(ROOT / "examples" / "probe_S1.xyz"), "charge": 0, "multiplicity": 1,
+                "atom_index_base": 1, "dihedral": [1, 2, 5, 99],
+                "scan": {"start_deg": 0, "end_deg": 90, "n_steps": 10},
+                "method": {"functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent": "CPCM(Water)", "nroots": 5, "iroot": 1, "tda": False},
+            })
+
     def test_homo_lumo_gap_alone_is_not_supported_mechanism(self):
         verdict = report.classify_mechanism([
             {"descriptor": "homo_lumo_gap", "assessment": "supportive"}
         ])
         self.assertEqual(verdict, "INSUFFICIENT")
+
+    def test_repeated_spectral_evidence_cannot_be_supported(self):
+        verdict = report.classify_mechanism([
+            {"descriptor": "absorption_red_shift", "evidence_family": "spectral", "assessment": "strong"},
+            {"descriptor": "emission_red_shift", "evidence_family": "spectral", "assessment": "supportive"},
+        ])
+        self.assertEqual(verdict, "PLAUSIBLE")
+
+    def test_independent_evidence_families_can_be_supported(self):
+        verdict = report.classify_mechanism([
+            {"descriptor": "NTO", "evidence_family": "NTO", "assessment": "strong"},
+            {"descriptor": "emission_red_shift", "evidence_family": "spectral", "assessment": "supportive"},
+        ])
+        self.assertEqual(verdict, "SUPPORTED")
 
     def test_report_preserves_evidence_levels(self):
         payload, markdown = report.build_report({

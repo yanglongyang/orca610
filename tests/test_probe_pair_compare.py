@@ -22,9 +22,16 @@ class ProbePairCompareTests(unittest.TestCase):
 
     def test_rejects_mixed_functional(self):
         data = copy.deepcopy(self.data)
-        data["species_results"][1]["protocol"]["functional"] = "PBE0"
+        data["species_results"][1]["protocol"]["absorption"]["functional"] = "PBE0"
         with self.assertRaises(pair.ProbePairError):
             pair.compare_pair(data)
+
+    def test_e00_requires_a_passing_energy_cycle_gate(self):
+        data = copy.deepcopy(self.data)
+        data["species_results"][1]["observables"]["E00"] = {"eV": 2.51}
+        result = pair.compare_pair(data)
+        self.assertIsNone(result["deltas_comparison_minus_reference"]["E00_eV"])
+        self.assertEqual(result["validated_E00"]["comparison"]["status"], "NOT_VALIDATED")
 
 
 if __name__ == "__main__":

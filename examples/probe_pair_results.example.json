@@ -4,18 +4,10 @@
     {
       "id": "probe",
       "protocol": {
-        "functional": "CAM-B3LYP",
-        "basis": "def2-SVPD",
-        "dispersion": "D3BJ",
-        "solvent_model": "CPCM",
-        "solvent": "Water",
-        "solvent_regime": "non-equilibrium vertical",
-        "cpcmeq": false,
-        "tda": false,
-        "excited_state_method": "full TD-DFT",
-        "absorption_protocol": "vertical_at_R0",
-        "emission_protocol": "vertical_at_R1",
-        "numerical_settings": {"nroots": 5, "grid": "default"}
+        "s0_geometry": {"method_family": "DFT", "functional": "CAM-B3LYP", "basis": "def2-SVP", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "equilibrium gradient", "cpcmeq": true, "numerical_settings": {"nprocs": 8}},
+        "absorption": {"method_family": "TD-DFT", "functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "non-equilibrium vertical", "cpcmeq": false, "tda": false, "excited_state_method": "full TD-DFT", "numerical_settings": {"nroots": 5}},
+        "s1_geometry": {"method_family": "TD-DFT", "functional": "CAM-B3LYP", "basis": "def2-SVP", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "equilibrium gradient", "cpcmeq": true, "tda": false, "excited_state_method": "full TD-DFT", "numerical_settings": {"nroots": 5}},
+        "emission": {"method_family": "TD-DFT", "functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "equilibrium emission response", "cpcmeq": true, "tda": false, "excited_state_method": "full TD-DFT", "numerical_settings": {"nroots": 5}}
       },
       "observables": {
         "absorption_eV": 3.20,
@@ -24,7 +16,7 @@
         "emission_eV": 2.70,
         "emission_nm": 459.20,
         "emission_f": 0.08,
-        "E00_eV": 2.88,
+        "E00": {"eV": 2.88, "energy_cycle_gate": "PASS", "source": "analysis/probe_energy_cycle.json"},
         "homo_eV": -6.10,
         "lumo_eV": -2.05
       }
@@ -32,18 +24,10 @@
     {
       "id": "fluorophore",
       "protocol": {
-        "functional": "CAM-B3LYP",
-        "basis": "def2-SVPD",
-        "dispersion": "D3BJ",
-        "solvent_model": "CPCM",
-        "solvent": "Water",
-        "solvent_regime": "non-equilibrium vertical",
-        "cpcmeq": false,
-        "tda": false,
-        "excited_state_method": "full TD-DFT",
-        "absorption_protocol": "vertical_at_R0",
-        "emission_protocol": "vertical_at_R1",
-        "numerical_settings": {"nroots": 5, "grid": "default"}
+        "s0_geometry": {"method_family": "DFT", "functional": "CAM-B3LYP", "basis": "def2-SVP", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "equilibrium gradient", "cpcmeq": true, "numerical_settings": {"nprocs": 8}},
+        "absorption": {"method_family": "TD-DFT", "functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "non-equilibrium vertical", "cpcmeq": false, "tda": false, "excited_state_method": "full TD-DFT", "numerical_settings": {"nroots": 5}},
+        "s1_geometry": {"method_family": "TD-DFT", "functional": "CAM-B3LYP", "basis": "def2-SVP", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "equilibrium gradient", "cpcmeq": true, "tda": false, "excited_state_method": "full TD-DFT", "numerical_settings": {"nroots": 5}},
+        "emission": {"method_family": "TD-DFT", "functional": "CAM-B3LYP", "basis": "def2-SVPD", "dispersion": "D3BJ", "solvent_model": "CPCM", "solvent": "Water", "solvent_regime": "equilibrium emission response", "cpcmeq": true, "tda": false, "excited_state_method": "full TD-DFT", "numerical_settings": {"nroots": 5}}
       },
       "observables": {
         "absorption_eV": 2.95,
@@ -52,7 +36,7 @@
         "emission_eV": 2.35,
         "emission_nm": 527.59,
         "emission_f": 0.24,
-        "E00_eV": 2.51,
+        "E00": {"eV": 2.51, "energy_cycle_gate": "PASS", "source": "analysis/fluorophore_energy_cycle.json"},
         "homo_eV": -5.72,
         "lumo_eV": -2.18
       }

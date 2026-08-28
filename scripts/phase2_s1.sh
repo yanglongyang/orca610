@@ -65,10 +65,13 @@ PYEOF
 
     final_root=$(get_final_iroot "$opt_out" "$IROOT")
     log "$mol: requested IROOT=$IROOT, final followed root=$final_root"
-    # The safe default NTO_STATES is IROOT.  If root following moves that state,
-    # request the NTO for the final root rather than silently analysing the old one.
-    em_nto_states="$NTO_STATES"
-    [ "$NTO_STATES" != "$IROOT" ] || em_nto_states="$final_root"
+    # Always request an NTO for the final followed root. A user may request
+    # several diagnostic roots, but that list must not omit the target emission state.
+    em_nto_states="${NTO_STATES// /}"
+    case ",${em_nto_states}," in
+        *",${final_root},"*) ;;
+        *) em_nto_states="${em_nto_states:+${em_nto_states},}${final_root}" ;;
+    esac
 
     # Separate SP avoids accidentally extracting a TD spectrum from a displaced
     # frequency sub-calculation. The solvent regime is explicit.

@@ -1,10 +1,10 @@
 {
-  "xyz": "probe_S1.xyz",
+  "xyz": "examples/probe_S1.xyz",
   "charge": 0,
   "multiplicity": 1,
   "atom_index_base": 1,
   "dihedral": [1, 2, 5, 6],
-  "range_deg": [0, 90, 10],
+  "scan": {"start_deg": 0, "end_deg": 90, "n_steps": 10},
   "method": {
     "functional": "CAM-B3LYP",
     "basis": "def2-SVPD",

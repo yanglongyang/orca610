@@ -1,8 +1,8 @@
-# AutoORCA 3.1 — Fluorescence Probe Analysis
+# AutoORCA 3.1.1 — Fluorescence Probe Analysis
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.1 builds a fluorescence-probe analysis layer on them: controlled probe/product comparison, NTO/ICT evidence, solvent-series validation, conservative TICT diagnostics, and evidence-ranked reports.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.1.1 builds a fluorescence-probe analysis layer on them: phase-specific probe/product provenance, energy-gated E00 comparison, NTO/ICT evidence, solvent-series validation, conservative TICT diagnostics, and evidence-ranked reports.
 
 ## Repository layout
 

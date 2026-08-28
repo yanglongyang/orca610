@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.1.0
+version: 3.1.1
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -472,7 +472,7 @@ Official online manual: `https://www.faccts.de/docs/orca/6.1/manual/`
 
 Trigger this mode when comparing an intact probe, released fluorophore, reaction product, or reference dye. Preserve all v3.0 energy/provenance/state-identity gates; this is an added interpretation layer, not a replacement.
 
-1. Read `references/probe_pair_analysis.md` and require a matched protocol before attributing a spectral difference to chemistry.
+1. Read `references/probe_pair_analysis.md` and require matched **phase-specific** protocols before attributing a spectral difference to chemistry. `E00` is reportable only with a passing four-point energy-cycle source.
 2. Read `references/ict_nto_analysis.md`; request NTOs for relevant R0/R1 states and verify state identity before comparing them.
 3. Use `references/solvent_effects.md` to label fixed-geometry and solvent-relaxed series separately.
 4. Use `references/tict_diagnostics.md` only for user-defined dihedrals. A twisted geometry alone is never a TICT conclusion.

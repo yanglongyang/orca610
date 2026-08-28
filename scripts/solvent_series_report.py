@@ -14,6 +14,7 @@ class SolventSeriesError(ValueError):
 CONTROLLED_KEYS = (
     "functional", "basis", "dispersion", "solvent_model", "solvent_regime",
     "cpcmeq", "tda", "excited_state_method", "state_identity", "numerical_settings",
+    "transition_kind", "geometry_surface",
 )
 REQUIRED_ENTRY_KEYS = ("solvent", "epsilon", "geometry_solvent", "energy_solvent", "geometry_id", "transition_eV")
 
@@ -38,6 +39,16 @@ def validate_series(data: dict) -> list[dict]:
     geometries = {entry.get("geometry_id") for entry in entries}
     if protocol == "fixed_geometry" and (None in geometries or len(geometries) != 1):
         raise SolventSeriesError("fixed_geometry protocol requires one shared geometry_id")
+    if protocol == "solvent_relaxed" and not data.get("allow_geometry_solvent_mismatch", False):
+        mismatches = [
+            entry["solvent"] for entry in entries
+            if entry["geometry_solvent"] != entry["solvent"]
+        ]
+        if mismatches:
+            raise SolventSeriesError(
+                "solvent_relaxed protocol requires geometry_solvent to match solvent; "
+                "set allow_geometry_solvent_mismatch only for a documented composite protocol"
+            )
     return entries
 
 
@@ -53,6 +64,8 @@ def summarize_series(data: dict) -> dict:
             "epsilon": entry["epsilon"],
             "geometry_solvent": entry["geometry_solvent"],
             "energy_solvent": entry["energy_solvent"],
+            "transition_kind": entry["transition_kind"],
+            "geometry_surface": entry["geometry_surface"],
             "transition_eV": float(entry["transition_eV"]),
             "wavelength_nm": 1239.8419843320026 / float(entry["transition_eV"]),
             "shift_eV_from_reference": shift,

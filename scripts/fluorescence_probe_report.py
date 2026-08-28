@@ -55,15 +55,16 @@ def classify_ict(record: dict) -> dict:
 
 
 def classify_mechanism(evidence: list[dict]) -> str:
-    """Require more than a canonical-orbital descriptor for a strong claim."""
+    """Require independent non-canonical evidence for a strong claim."""
     meaningful = [
         item for item in evidence
         if item.get("descriptor") not in {"homo_lumo_gap", "canonical_orbital_image"}
     ]
     supporting = [item for item in meaningful if item.get("assessment") in {"supportive", "strong"}]
-    strong = [item for item in meaningful if item.get("assessment") == "strong"]
+    families = {item.get("evidence_family") for item in supporting if item.get("evidence_family")}
+    strong = [item for item in supporting if item.get("assessment") == "strong"]
     contradicting = [item for item in meaningful if item.get("assessment") == "contradictory"]
-    if strong and len(supporting) >= 2:
+    if strong and len(supporting) >= 2 and len(families) >= 2:
         return "SUPPORTED"
     if contradicting and not supporting:
         return "CONTRADICTED"

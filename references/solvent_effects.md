@@ -11,4 +11,4 @@ Do not label solvent-relaxed shifts as pure solvent effects. For every entry ret
 python3 scripts/solvent_series_report.py examples/solvent_series.example.json
 ```
 
-The script rejects a mixed-geometry series mislabeled `fixed_geometry`.
+Every series entry records `transition_kind` (`absorption` or `emission`) and `geometry_surface` (`R0` or `R1`); these must be matched across a controlled series. The script rejects a mixed-geometry series mislabeled `fixed_geometry`. Under `solvent_relaxed`, `geometry_solvent` must equal the entry solvent unless an explicit `allow_geometry_solvent_mismatch` composite-protocol override is documented.
