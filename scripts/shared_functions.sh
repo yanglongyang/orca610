@@ -12,6 +12,20 @@ MANUAL_DIR="${MANUAL_DIR:-$ORCA_ROOT/manual/orca_manual_kb}"
 export PATH="$ORCA_ROOT:$PATH"
 export LD_LIBRARY_PATH="$ORCA_ROOT:${LD_LIBRARY_PATH:-}"
 
+detect_orca_version() {
+    local executable output version
+    executable="${ORCA_BINARY:-$ORCA_ROOT/orca}"
+    if [ ! -x "$executable" ]; then
+        executable=$(command -v orca 2>/dev/null || true)
+    fi
+    [ -n "$executable" ] || { echo "unknown"; return; }
+    output=$("$executable" --version 2>/dev/null || true)
+    version=$(printf '%s\n' "$output" | sed -nE 's/.*([Pp]rogram )?[Vv]ersion[[:space:]:=]+([0-9][^[:space:],;)]*).*/\2/p' | head -1)
+    echo "${version:-unknown}"
+}
+ORCA_VERSION="${ORCA_VERSION:-$(detect_orca_version)}"
+export ORCA_VERSION
+
 WORKDIR="${AUTOORCA_WORKDIR:-$PWD}"
 WORKDIR="$(realpath "$WORKDIR")"
 STATUS_FILE="${STATUS_FILE:-$WORKDIR/cascade_status.json}"
@@ -112,7 +126,8 @@ PYEOF
 
 write_autoorca_metadata() {
     local calc=$1 family=$2 functional=$3 basis=$4 dispersion=$5 solvent=$6 regime=$7 geometry=$8 target=${9:-}
-    echo "# @AUTOORCA: 3.4.2"
+    echo "# @AUTOORCA: 3.4.3"
+    echo "# @ORCA: ${ORCA_VERSION}"
     echo "# @CALCULATION_TYPE: ${calc}"
     echo "# @METHOD_FAMILY: ${family}"
     echo "# @FUNCTIONAL: ${functional}"

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -85,3 +86,22 @@ class ExperienceGateTests(unittest.TestCase):
         result = experience_gate.check(self.input, self.manifest, "s0_optfreq")
         self.assertFalse(result["failures"])
         self.assertTrue(result["similar_observations"])
+
+    def test_new_similar_failure_requires_explicit_acknowledgement(self):
+        self.input.write_text("! CAM-B3LYP\n%pal\n nprocs 2\nend\n# current run\n")
+        experience_gate.check(self.input, self.manifest, "s0_optfreq")
+        failed_input = self.work / "failed.inp"
+        failed_input.write_text("! CAM-B3LYP\n%pal\n nprocs 2\nend\n# failed run\n")
+        output = self.work / "failed.out"; output.write_text("INPUT ERROR\n")
+        case_dir = self.work / "experience" / "cases" / "failure"
+        experience_gate.record_failure(SimpleNamespace(input=str(failed_input), output=str(output), pattern="INPUT ERROR", case_dir=str(case_dir), orca_version="6.1.0"))
+        with self.assertRaises(experience_gate.ExperienceError) as caught:
+            experience_gate.require(self.input, self.manifest)
+        self.assertIn("EXPERIENCE_WARNING_ACK_REQUIRED", str(caught.exception))
+        self.assertIn("Similar project-local failures", str(caught.exception))
+        experience_gate.acknowledge(self.input, self.manifest)
+        self.assertEqual(experience_gate.require(self.input, self.manifest)["input_path"], str(self.input.resolve()))
+
+    def test_detects_orca_version_when_not_configured(self):
+        with patch.dict(os.environ, {"ORCA_VERSION": ""}), patch.object(experience_gate.shutil, "which", return_value="/opt/orca/orca"), patch.object(experience_gate.subprocess, "run", return_value=SimpleNamespace(stdout="Program Version 6.1.7\n")):
+            self.assertEqual(experience_gate.detected_orca_version(), "6.1.7")

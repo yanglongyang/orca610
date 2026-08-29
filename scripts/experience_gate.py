@@ -9,7 +9,9 @@ import json
 import os
 import re
 import socket
+import subprocess
 import sys
+import shutil
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -62,6 +64,22 @@ def case_dir() -> Path:
     return Path(os.environ.get("AUTOORCA_EXPERIENCE_CASE_DIR", "experience/cases/failure"))
 
 
+def detected_orca_version() -> str:
+    """Return an explicit ORCA version when available, never silently invent one."""
+    configured = os.environ.get("ORCA_VERSION")
+    if configured:
+        return configured
+    executable = os.environ.get("ORCA_BINARY") or shutil.which("orca")
+    if not executable:
+        return "unknown"
+    try:
+        output = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=10, check=False).stdout
+    except OSError:
+        return "unknown"
+    match = re.search(r"(?:program\s+)?version\s*[:=]?\s*([0-9][^\s,;)]*)", output, re.I)
+    return match.group(1) if match else "unknown"
+
+
 def index_sha256() -> str:
     """Hash every evidence source consulted by the gate, not rules alone."""
     paths = list(rules_dir().rglob("*.json"))
@@ -107,6 +125,7 @@ def local_observations() -> list[dict]:
             continue
         if isinstance(record, dict):
             record["record_path"] = str(path)
+            record["record_sha256"] = sha256(path)
             records.append(record)
     return records
 
@@ -128,6 +147,10 @@ def observation_matches(text: str, input_hash: str, dependency_fingerprints: lis
             record["similarity"] = round(SequenceMatcher(None, text, prior).ratio(), 3)
             similar.append(record)
     return exact, similar
+
+
+def similar_ids(result: dict) -> list[str]:
+    return sorted({item["record_sha256"] for item in result.get("similar_observations", [])})
 
 
 def load_manifest(path: Path) -> dict:
@@ -152,7 +175,7 @@ def evaluate(input_path: Path, calc_type: str | None) -> dict:
     input_hash = sha256(input_path)
     dependency_fingerprints = dependencies(input_path, text)
     input_metadata = metadata(text)
-    orca_version = input_metadata.get("ORCA", os.environ.get("ORCA_VERSION", "unspecified"))
+    orca_version = input_metadata.get("ORCA") or detected_orca_version()
     exact, similar = observation_matches(text, input_hash, dependency_fingerprints, orca_version)
     for record in exact:
         failures.append({"rule_id": "EXACT_REPEAT_LOCAL_FAILURE", "evidence_level": "LOCAL_OBSERVATION", "message": f"this exact input previously failed under ORCA {orca_version}", "evidence": [record["record_path"], record.get("matched_pattern") or "unclassified failure"], "correct_pattern": {"action": "inspect and modify the input; do not blindly repeat the recorded failure"}})
@@ -167,6 +190,12 @@ def lookup(calc_type: str) -> dict:
 def check(input_path: Path, manifest_path: Path, calc_type: str | None) -> dict:
     result = evaluate(input_path, calc_type)
     if result["failures"]: raise ExperienceError(render(result))
+    # The complete preflight is displayed before the mandatory input review.
+    # These warnings are therefore part of that review; later observations need
+    # their own acknowledgement before the already-approved input can run.
+    result["acknowledged_similar_observations"] = similar_ids(result)
+    if result["acknowledged_similar_observations"]:
+        result["similar_observations_reviewed_at"] = now()
     manifest = load_manifest(manifest_path); manifest["inputs"][result["input_path"]] = result; save_manifest(manifest_path, manifest)
     return result
 
@@ -183,11 +212,33 @@ def require(input_path: Path, manifest_path: Path) -> dict:
         # Evidence has changed but this exact scientific input has not. Re-evaluate
         # above, refuse any new hard evidence, otherwise refresh only the
         # experience record. Input-review approval remains independently hash-bound.
+        acknowledged = set(record.get("acknowledged_similar_observations", []))
+        new_similar = [item for item in result["similar_observations"] if item["record_sha256"] not in acknowledged]
+        if new_similar:
+            result["new_similar_observations"] = new_similar
+            raise ExperienceError(render(result) + f"\n[EXPERIENCE-GATE] EXPERIENCE_WARNING_ACK_REQUIRED: inspect the new similar failure(s), then run: python3 {Path(__file__)} acknowledge {input_path} --manifest {manifest_path}")
+        result["acknowledged_similar_observations"] = sorted(acknowledged)
         result["refreshed_at"] = now()
         manifest["inputs"][result["input_path"]] = result
         save_manifest(manifest_path, manifest)
         return result
     return record
+
+
+def acknowledge(input_path: Path, manifest_path: Path) -> dict:
+    """Acknowledge newly surfaced similar failures without re-approving input."""
+    manifest = load_manifest(manifest_path)
+    existing = manifest["inputs"].get(str(input_path.resolve()))
+    result = evaluate(input_path, existing.get("calculation_type") if existing else None)
+    if not existing or existing.get("input_sha256") != result["input_sha256"]:
+        raise ExperienceError("EXPERIENCE_CHECK_REQUIRED: input changed; regenerate and review it before acknowledging experience warnings.")
+    if result["failures"]:
+        raise ExperienceError(render(result))
+    result["acknowledged_similar_observations"] = similar_ids(result)
+    result["similar_observations_acknowledged_at"] = now()
+    manifest["inputs"][result["input_path"]] = result
+    save_manifest(manifest_path, manifest)
+    return result
 
 
 def render(result: dict) -> str:
@@ -200,6 +251,8 @@ def render(result: dict) -> str:
         lines += ["Project-local observations (not generalized rules):"] + [f"  - {item['record_path']} [{item.get('matched_pattern') or 'unclassified'}]" for item in result["local_observations"]]
     if result.get("similar_observations"):
         lines += ["Similar project-local failures (warning; inspect before proceeding):"] + [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["similar_observations"]]
+    if result.get("new_similar_observations"):
+        lines += ["New similar failures requiring acknowledgement:"] + [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["new_similar_observations"]]
     if result.get("failures"):
         lines.append("[EXPERIENCE-GATE] KNOWN INVALID PATTERN")
         for failure in result["failures"]:
@@ -213,7 +266,7 @@ def record_failure(args: argparse.Namespace) -> Path:
     input_path, output_path = Path(args.input).resolve(), Path(args.output).resolve()
     output_text = output_path.read_text(errors="replace") if output_path.exists() else ""
     input_text = input_path.read_text(errors="replace") if input_path.exists() else ""
-    entry = {"recorded_at": now(), "evidence_level": "LOCAL_OBSERVATION", "input": str(input_path), "input_text": input_text, "input_sha256": sha256(input_path) if input_path.exists() else None, "input_metadata": metadata(input_text), "dependency_fingerprints": dependencies(input_path, input_text) if input_path.exists() else {}, "orca_version": args.orca_version or metadata(input_text).get("ORCA") or os.environ.get("ORCA_VERSION", "unspecified"), "calculation_type": calculation_type(input_text, None), "output": str(output_path), "matched_pattern": args.pattern or None, "output_tail": output_text[-8000:], "host": socket.gethostname(), "environment": {key: os.environ.get(key) for key in ("ORCA_ROOT", "MYORCA", "ORCA_VERSION")}, "note": "Automatically captured project-local failure. It is not a reusable global rule until reviewed and promoted."}
+    entry = {"recorded_at": now(), "evidence_level": "LOCAL_OBSERVATION", "input": str(input_path), "input_text": input_text, "input_sha256": sha256(input_path) if input_path.exists() else None, "input_metadata": metadata(input_text), "dependency_fingerprints": dependencies(input_path, input_text) if input_path.exists() else {}, "orca_version": args.orca_version or metadata(input_text).get("ORCA") or detected_orca_version(), "calculation_type": calculation_type(input_text, None), "output": str(output_path), "matched_pattern": args.pattern or None, "output_tail": output_text[-8000:], "host": socket.gethostname(), "environment": {key: os.environ.get(key) for key in ("ORCA_ROOT", "MYORCA", "ORCA_VERSION")}, "note": "Automatically captured project-local failure. It is not a reusable global rule until reviewed and promoted."}
     directory = Path(args.case_dir); directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"failure_{dt.datetime.now().strftime('%Y%m%dT%H%M%S')}_{input_path.stem}.json"
     path.write_text(json.dumps(entry, indent=2) + "\n"); return path
@@ -221,7 +274,7 @@ def record_failure(args: argparse.Namespace) -> Path:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("lookup", "check", "require", "record-failure"))
+    parser.add_argument("command", choices=("lookup", "check", "require", "acknowledge", "record-failure"))
     parser.add_argument("input", nargs="?")
     parser.add_argument("--manifest", default="experience_checks.json")
     parser.add_argument("--calculation-type")
@@ -238,6 +291,7 @@ def main() -> None:
             if not args.output: raise ExperienceError("record-failure requires --output")
             print(f"[EXPERIENCE] local failure recorded: {record_failure(args)}")
         elif args.command == "check": print(render(check(Path(args.input), Path(args.manifest), args.calculation_type)))
+        elif args.command == "acknowledge": print(render(acknowledge(Path(args.input), Path(args.manifest))))
         else: print("[EXPERIENCE-GATE] VERIFIED: " + require(Path(args.input), Path(args.manifest))["input_path"])
     except ExperienceError as exc:
         print(str(exc), file=sys.stderr); raise SystemExit(EXPERIENCE_EXIT)
