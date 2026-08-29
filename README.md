@@ -1,8 +1,8 @@
-# AutoORCA 3.4.0 — Experience-, State-, and Review-Gated Photophysics
+# AutoORCA 3.4.1 — Experience-, State-, and Review-Gated Photophysics
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.0 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. The v3.1.1 fluorescence-probe analysis layer remains included.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.1 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. The v3.1.1 fluorescence-probe analysis layer remains included.
 
 ## Repository layout
 
@@ -136,11 +136,11 @@ python3 /path/to/orca610/scripts/state_gate.py confirm \
 
 Use `scripts/run_reviewed_input.sh input.inp` for ad-hoc AutoORCA inputs; never call ORCA or its wrapper directly.
 
-## Experience-consistency gate (v3.4)
+## Experience-consistency gate (v3.4.1)
 
-Before any generated input reaches human review, AutoORCA queries structured known-failure rules and available template evidence. A known invalid syntax pattern is refused immediately; it cannot become a reviewable input. For example, ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` / `TD-DFT` in the `!` line and requires TD-DFT controls in `%tddft`.
+Before any generated input is written, AutoORCA queries structured known-failure rules, available template evidence, and project-local observations. It repeats the check against the rendered input before human review. A known invalid syntax pattern or an exact repeat of a recorded local failure under the same ORCA version is refused immediately; it cannot become a reviewable input. Similar prior failures are shown as warnings for scientific inspection. For example, ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` / `TD-DFT` in the `!` line and requires TD-DFT controls in `%tddft`.
 
-The preflight record is hash-bound to both the input and rule database. Runtime failures are persistently captured in `experience/cases/failure/` as `LOCAL_OBSERVATION`; they never become universal rules without human curation. See `references/experience_memory.md`.
+The preflight record is hash-bound to the input and the complete consulted evidence index (rules, templates, and local cases). Runtime failures persist the full input, machine-readable provenance, dependency fingerprints, ORCA version, selected environment information, and output tail in `experience/cases/failure/` as `LOCAL_OBSERVATION`; they never become universal rules without human curation. See `references/experience_memory.md`.
 
 ## Current cascade
 
@@ -158,6 +158,7 @@ Phase 2  R0 vertical TD-DFT + NTO
 Phase 3  ESD(IC)
          -> method-compatibility gate for S0/S1 Hessians
          -> ground-state input geometry
+         -> approved R0 root at that S0 geometry (not the followed R1 ordinal root)
          -> full TD-DFT NACME by default
 
 Phase 4  Report

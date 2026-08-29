@@ -29,7 +29,9 @@ PYEOF
     [ -f "$s0_xyz" ] || { log "FATAL: missing S0 optimized geometry for $mol"; exit 1; }
 
     vertical_inp="${mol}_R0_Absorption.inp"; vertical_out="${mol}_R0_Absorption.out"
+    vertical_nto_states=$(all_roots "$NROOTS")
     if [ ! -f "$vertical_inp" ]; then
+        experience_lookup "vertical_absorption" || exit $?
         {
             write_autoorca_metadata "vertical_absorption" "TD-DFT" "$S1_FUNCTIONAL" "$S1_BASIS" "$S1_DISPERSION" "$S1_SOLVENT" "nonequilibrium" "$s0_xyz"
             echo "# ${mol} R0 vertical TD-DFT state-selection calculation"
@@ -41,7 +43,7 @@ PYEOF
             echo "  tda ${S1_TDA}"
             echo "  cpcmeq ${ABS_CPCMEQ}"
             echo "  donto true"
-            echo "  ntostates ${NTO_STATES}"
+            echo "  ntostates ${vertical_nto_states}"
             echo "  ntothresh ${NTO_THRESH}"
             echo "end"
             echo "* xyzfile ${CHARGE} ${MULT} \"${s0_xyz}\""
@@ -58,9 +60,11 @@ PYEOF
         exit 4
     fi
     selected_root=$(selected_state_root "$mol")
+    opt_nto_states=$(append_nto_root "$NTO_STATES" "$selected_root")
 
     opt_inp="${mol}_S1_Opt.inp"; opt_out="${mol}_S1_Opt.out"; s1_xyz="${mol}_S1_Opt.xyz"
     if [ ! -f "$opt_inp" ]; then
+        experience_lookup "s1_opt" || exit $?
         {
             write_autoorca_metadata "s1_opt" "TD-DFT" "$S1_FUNCTIONAL" "$S1_BASIS" "$S1_DISPERSION" "$S1_SOLVENT" "equilibrium" "$s0_xyz" "${mol}_R0_root_${selected_root}_approved"
             echo "# ${mol} S1 optimization; root selected by human at R0"
@@ -74,7 +78,7 @@ PYEOF
             echo "  followiroot ${FOLLOW_IROOT}"
             echo "  cpcmeq ${S1_CPCMEQ}"
             echo "  donto true"
-            echo "  ntostates ${NTO_STATES}"
+            echo "  ntostates ${opt_nto_states}"
             echo "  ntothresh ${NTO_THRESH}"
             echo "end"
             echo "* xyzfile ${CHARGE} ${MULT} \"${s0_xyz}\""
@@ -97,10 +101,12 @@ PYEOF
     [ "$confirmed_root" = "$final_root" ] || { log "FATAL: confirmed final root $confirmed_root does not match optimization output root $final_root"; exit 4; }
 
     s1_hess=""; s1_imag=""
+    final_nto_states=$(append_nto_root "$NTO_STATES" "$final_root")
     if [ "${S1_FREQUENCY,,}" = "true" ]; then
         freq_inp="${mol}_S1_Freq.inp"; freq_out="${mol}_S1_Freq.out"; s1_hess="${mol}_S1_Freq.hess"
         record_method "s1_freq" "$S1_FUNCTIONAL" "$S1_BASIS" "$S1_DISPERSION" "$S1_SOLVENT" "$S1_TDA" "$CHARGE" "$MULT" "human-confirmed S1 optimized geometry"
         if [ ! -f "$freq_inp" ]; then
+            experience_lookup "s1_freq" || exit $?
             {
                 write_autoorca_metadata "s1_freq" "TD-DFT" "$S1_FUNCTIONAL" "$S1_BASIS" "$S1_DISPERSION" "$S1_SOLVENT" "equilibrium" "$s1_xyz" "${mol}_S1_identity_confirmed_root_${final_root}"
                 echo "# ${mol} S1 frequency after human state-identity confirmation"
@@ -114,7 +120,7 @@ PYEOF
                 echo "  followiroot ${FOLLOW_IROOT}"
                 echo "  cpcmeq ${S1_CPCMEQ}"
                 echo "  donto true"
-                echo "  ntostates ${NTO_STATES}"
+                echo "  ntostates ${final_nto_states}"
                 echo "  ntothresh ${NTO_THRESH}"
                 echo "end"
                 echo "* xyzfile ${CHARGE} ${MULT} \"${s1_xyz}\""
@@ -125,11 +131,17 @@ PYEOF
         fi
         run_orca "$freq_inp" || { rc=$?; exit "$rc"; }
         [ -f "$s1_hess" ] || { log "FATAL: S1 frequency Hessian missing: $s1_hess"; exit 1; }
-        s1_imag=$(get_imag_count "$freq_out" || true)
+        set +e
+        s1_imag=$(get_imag_count "$freq_out")
+        s1_imag_rc=$?
+        set -e
+        [ "$s1_imag_rc" -ne 2 ] || { log "FATAL: S1 frequency summary missing; do not use this Hessian."; exit 1; }
+        [ "$s1_imag_rc" -eq 0 ] || { log "FATAL: $mol S1 frequency has $s1_imag imaginary modes; do not use this Hessian for AH ESD."; exit 1; }
     fi
 
     em_inp="${mol}_S1_Emission.inp"; em_out="${mol}_S1_Emission.out"
     if [ ! -f "$em_inp" ]; then
+        experience_lookup "vertical_emission" || exit $?
         {
             write_autoorca_metadata "vertical_emission" "TD-DFT" "$EM_FUNCTIONAL" "$EM_BASIS" "$EM_DISPERSION" "$EM_SOLVENT" "equilibrium" "$s1_xyz" "${mol}_S1_identity_confirmed_root_${final_root}"
             echo "# ${mol} vertical emission at human-confirmed S1 geometry"
@@ -142,7 +154,7 @@ PYEOF
             echo "  tda ${EM_TDA}"
             echo "  cpcmeq ${EM_CPCMEQ}"
             echo "  donto true"
-            echo "  ntostates ${NTO_STATES}"
+            echo "  ntostates ${final_nto_states}"
             echo "  ntothresh ${NTO_THRESH}"
             echo "end"
             echo "* xyzfile ${CHARGE} ${MULT} \"${s1_xyz}\""

@@ -48,6 +48,7 @@ EM_CPCMEQ=true
 
 # ESD(IC): ORCA 6.1 recommends full TD-DFT for NACME.
 IC_TDA=false
+IC_CPCMEQ=true
 ALLOW_MIXED_HESSIANS=false
 
 # Optional fluorescence-probe analysis. Leave empty when Multiwfn is absent;

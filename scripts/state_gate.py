@@ -6,6 +6,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -35,6 +36,15 @@ def normal_output(path: Path) -> None:
         raise StateGateError(f"output is not a normal ORCA completion: {path}")
 
 
+def nroots(input_path: Path) -> int:
+    text = input_path.read_text(errors="replace")
+    block = re.search(r"%tddft\b(.*?)\bend\b", text, re.I | re.S)
+    match = re.search(r"^\s*nroots\s+(\d+)", block.group(1) if block else "", re.I | re.M)
+    if not match:
+        raise StateGateError(f"cannot validate state root: TDDFT nroots is missing in {input_path}")
+    return int(match.group(1))
+
+
 def load(path: Path) -> dict:
     if not path.exists():
         return {"schema_version": 1, "species": {}}
@@ -55,6 +65,9 @@ def fingerprints(*paths: Path) -> dict[str, dict[str, str]]:
 def select(args: argparse.Namespace) -> dict:
     vertical_input, vertical_output = Path(args.vertical_input), Path(args.vertical_output)
     normal_output(vertical_output)
+    root_count = nroots(vertical_input)
+    if args.root < 1 or args.root > root_count:
+        raise StateGateError(f"selected root {args.root} is outside vertical TDDFT nroots=1..{root_count}")
     data = load(Path(args.manifest))
     entry = data["species"].setdefault(args.species, {})
     entry["selection"] = {
@@ -62,6 +75,7 @@ def select(args: argparse.Namespace) -> dict:
         "state_character": args.state_character,
         "selection_basis": args.selection_basis,
         "approved_by": "human", "approved_at": now(),
+        "vertical_nroots": root_count,
         "vertical_fingerprints": fingerprints(vertical_input, vertical_output),
     }
     save(Path(args.manifest), data)
@@ -76,11 +90,15 @@ def confirm(args: argparse.Namespace) -> dict:
     selection = entry.get("selection")
     if not selection or selection.get("status") != "STATE_SELECTION_APPROVED":
         raise StateGateError("state selection is missing; select the R0 target state first")
+    root_count = nroots(opt_input)
+    if args.final_root < 1 or args.final_root > root_count:
+        raise StateGateError(f"confirmed final root {args.final_root} is outside S1 optimization TDDFT nroots=1..{root_count}")
     entry["identity"] = {
         "status": "STATE_IDENTITY_MATCH", "final_root": args.final_root,
         "state_character": args.state_character,
         "evidence": args.evidence, "approved_by": "human", "approved_at": now(),
         "selection_root": selection["selected_root"],
+        "opt_nroots": root_count,
         "opt_fingerprints": fingerprints(opt_input, opt_output),
     }
     save(Path(args.manifest), data)

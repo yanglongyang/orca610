@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.4.0
+version: 3.4.1
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -541,7 +541,7 @@ S0 Opt/Freq -> R0 vertical TD-DFT/NTO -> human STATE_SELECTION_APPROVED
 
 ---
 
-# 20. Experience-consistency gate (v3.4)
+# 20. Experience-consistency gate (v3.4.1)
 
 Read `references/experience_memory.md` before constructing any ORCA input. The mandatory order is:
 
@@ -550,10 +550,10 @@ identify calculation type -> experience lookup -> manual/method check
 -> generate input -> experience preflight PASS -> human input review -> run
 ```
 
-1. Search structured rules in `knowledge/rules/`, verified-success templates, deprecated failures, and relevant project-local observations.
+1. Run `scripts/experience_gate.py lookup --calculation-type TYPE` before writing any input. Search structured rules in `knowledge/rules/`, verified-success templates, deprecated failures, and relevant project-local observations.
 2. Classify evidence as `MANUAL_CONFIRMED`, `VERIFIED_SUCCESS`, `VERIFIED_FAILURE`, or `LOCAL_OBSERVATION`; never promote a local crash into a universal method claim automatically.
-3. Run `scripts/experience_gate.py check input.inp --calculation-type TYPE` before registering input review. A matching confirmed forbidden pattern is a hard refusal, not a review warning.
+3. Run `scripts/experience_gate.py check input.inp --calculation-type TYPE` before registering input review. A matching confirmed forbidden pattern, or an exact repeat of a recorded local failure under the same ORCA version, is a hard refusal, not a review warning. Similar local failures remain visible warnings.
 4. Use successful templates as syntax/protocol references only. Every molecule-specific instance still needs state selection (when relevant), experience check, and hash-bound human approval.
-5. Preserve runtime failures with `record-failure`; review and curate them before creating a reusable rule.
+5. Preserve runtime failures with `record-failure`, including input/provenance/dependency hashes/version/environment; review and curate them before creating a reusable rule.
 
 For example, the ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` or `TD-DFT` in the simple `!` line. Use the `%tddft ... end` block instead. Do not repeat a recorded syntax failure merely because an archive was not consulted.

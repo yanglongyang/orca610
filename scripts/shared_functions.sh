@@ -43,6 +43,12 @@ require_experience_check() {
     AUTOORCA_TEMPLATE_ARCHIVE="$TEMPLATE_DIR" AUTOORCA_EXPERIENCE_CASE_DIR="$EXPERIENCE_CASE_DIR" python3 "$EXPERIENCE_GATE_TOOL" require "$input" --manifest "$EXPERIENCE_GATE_FILE"
 }
 
+experience_lookup() {
+    local calculation_type=$1
+    AUTOORCA_TEMPLATE_ARCHIVE="$TEMPLATE_DIR" AUTOORCA_EXPERIENCE_CASE_DIR="$EXPERIENCE_CASE_DIR" \
+        python3 "$EXPERIENCE_GATE_TOOL" lookup --calculation-type "$calculation_type"
+}
+
 require_input_approval() {
     local input=$1 outfile=${2:-} rc
     local -a review_args=(require "$input" --manifest "$INPUT_REVIEW_FILE")
@@ -106,7 +112,7 @@ PYEOF
 
 write_autoorca_metadata() {
     local calc=$1 family=$2 functional=$3 basis=$4 dispersion=$5 solvent=$6 regime=$7 geometry=$8 target=${9:-}
-    echo "# @AUTOORCA: 3.3.0"
+    echo "# @AUTOORCA: 3.4.1"
     echo "# @CALCULATION_TYPE: ${calc}"
     echo "# @METHOD_FAMILY: ${family}"
     echo "# @FUNCTIONAL: ${functional}"
@@ -116,6 +122,18 @@ write_autoorca_metadata() {
     echo "# @SOLVENT_REGIME: ${regime}"
     echo "# @GEOMETRY_SOURCE: ${geometry}"
     [ -z "$target" ] || echo "# @TARGET_STATE: ${target}"
+}
+
+append_nto_root() {
+    local roots=${1// /} root=$2
+    case ",${roots}," in
+        *",${root},"*) echo "$roots" ;;
+        *) echo "${roots:+${roots},}${root}" ;;
+    esac
+}
+
+all_roots() {
+    seq -s, 1 "$1"
 }
 
 slugify() {
@@ -489,7 +507,7 @@ diagnose_error() {
     [ -n "$matched_pattern" ] && log "Matched pattern: $matched_pattern"
     log "Diagnosis saved to $diag"
     if [ -f "${basename}.inp" ]; then
-        python3 "$EXPERIENCE_GATE_TOOL" record-failure "${basename}.inp" --output "$outfile" --pattern "$matched_pattern" --case-dir "$EXPERIENCE_CASE_DIR" || log "WARNING: failed to persist local experience record"
+        python3 "$EXPERIENCE_GATE_TOOL" record-failure "${basename}.inp" --output "$outfile" --pattern "$matched_pattern" --case-dir "$EXPERIENCE_CASE_DIR" --orca-version "${ORCA_VERSION:-6.1.x}" || log "WARNING: failed to persist local experience record"
     fi
 }
 

@@ -15,9 +15,9 @@ class StateGateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.work = Path(self.temp.name)
         self.manifest = self.work / "state_gates.json"
-        self.vertical_input = self.work / "r0.inp"; self.vertical_input.write_text("! TDDFT\n")
+        self.vertical_input = self.work / "r0.inp"; self.vertical_input.write_text("! CAM-B3LYP\n%tddft\n nroots 3\nend\n")
         self.vertical_output = self.work / "r0.out"; self.vertical_output.write_text("ORCA TERMINATED NORMALLY\n")
-        self.opt_input = self.work / "s1.inp"; self.opt_input.write_text("! Opt TDDFT\n")
+        self.opt_input = self.work / "s1.inp"; self.opt_input.write_text("! Opt CAM-B3LYP\n%tddft\n nroots 3\nend\n")
         self.opt_output = self.work / "s1.out"; self.opt_output.write_text("ORCA TERMINATED NORMALLY\n")
 
     def tearDown(self): self.temp.cleanup()
@@ -37,3 +37,8 @@ class StateGateTests(unittest.TestCase):
     def test_selection_requires_normal_vertical_output(self):
         self.vertical_output.write_text("failed\n")
         with self.assertRaises(state_gate.StateGateError): state_gate.select(self.args())
+
+    def test_roots_must_be_within_input_nroots(self):
+        with self.assertRaises(state_gate.StateGateError): state_gate.select(self.args(root=4))
+        state_gate.select(self.args())
+        with self.assertRaises(state_gate.StateGateError): state_gate.confirm(self.args(final_root=4))

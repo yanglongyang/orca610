@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from input_review import ReviewError, _render, review
-from experience_gate import ExperienceError, check as experience_check
+from experience_gate import ExperienceError, check as experience_check, lookup as experience_lookup, render as render_experience
 
 
 class TictInputError(ValueError):
@@ -80,7 +80,7 @@ def build_input(config: dict) -> str:
     solvent_regime = method.get("solvent_regime", "equilibrium")
     start, end, steps = scan["start_deg"], scan["end_deg"], scan["n_steps"]
     return "\n".join((
-        "# @AUTOORCA: 3.3.0",
+        "# @AUTOORCA: 3.4.1",
         "# @CALCULATION_TYPE: tict_scan",
         "# @METHOD_FAMILY: TD-DFT",
         f"# @FUNCTIONAL: {method['functional']}",
@@ -89,7 +89,7 @@ def build_input(config: dict) -> str:
         f"# @SOLVENT: {method['solvent']}",
         f"# @SOLVENT_REGIME: {solvent_regime}",
         f"# @GEOMETRY_SOURCE: {config['xyz']}",
-        "# AutoORCA v3.3 TICT diagnostic: inspect state identity/NTOs at every scan point.",
+        "# AutoORCA v3.4.1 TICT diagnostic: inspect state identity/NTOs at every scan point.",
         f"! Opt {method['functional']} RIJCOSX {method['basis']} {method['dispersion']} {method['solvent']} TightScf",
         "%geom",
         "  Scan D " + " ".join(map(str, atoms)) + f" = {start}, {end}, {steps} end",
@@ -116,8 +116,9 @@ def main(config_path: str, output_path: str, manifest_path: str | None = None) -
         print(f"[TICT] ERROR: {exc}", file=sys.stderr)
         raise SystemExit(2)
     path = Path(output_path)
-    path.write_text(output)
     try:
+        print(render_experience(experience_lookup("tict_scan")))
+        path.write_text(output)
         manifest = Path(manifest_path or os.environ.get("INPUT_REVIEW_FILE", path.parent / "input_reviews.json"))
         experience_manifest = Path(os.environ.get("EXPERIENCE_GATE_FILE", path.parent / "experience_checks.json"))
         experience_check(path, experience_manifest, "tict_scan")

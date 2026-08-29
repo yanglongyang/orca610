@@ -9,6 +9,6 @@ Evidence levels are deliberately distinct:
 - `VERIFIED_FAILURE`: reproducible failure within a stated scope.
 - `LOCAL_OBSERVATION`: a captured project/machine event; never generalize it without review.
 
-`experience_gate.py check input.inp` is mandatory before review registration and `require` is repeated in `run_orca()`. A known invalid rule is a hard refusal. The gate records input and rule-database hashes in `experience_checks.json`; changing either requires a new check.
+`experience_gate.py lookup --calculation-type TYPE` is mandatory before generation, `check input.inp` repeats the lookup against the rendered input before review registration, and `require` is repeated in `run_orca()`. A known invalid rule is a hard refusal. Exact repetition of a captured failure under the same ORCA version is also refused; sufficiently similar prior failures are warnings requiring inspection. The gate records input and complete consulted-evidence-index hashes in `experience_checks.json`; changing rules, templates, or local cases requires a new check.
 
-Failed runtime jobs are saved under `experience/cases/failure/` as `LOCAL_OBSERVATION`. They are not promoted automatically into universal restrictions. Curate a reusable rule only after reviewing scope, evidence, and authoritative syntax.
+Failed runtime jobs are saved under `experience/cases/failure/` as `LOCAL_OBSERVATION`, including full input text, metadata, dependent-file hashes, ORCA version, selected environment data, and output tail. They are not promoted automatically into universal restrictions. Curate a reusable rule only after reviewing scope, evidence, and authoritative syntax.

@@ -23,6 +23,7 @@ for mol in "${MOLECULES[@]}"; do
     [ -f "$initial_xyz" ] || { log "FATAL: missing initial geometry $initial_xyz"; exit 1; }
 
     if [ ! -f "$inp" ]; then
+        experience_lookup "s0_optfreq" || exit $?
         {
             write_autoorca_metadata "s0_optfreq" "DFT" "$S0_FUNCTIONAL" "$S0_BASIS" "$S0_DISPERSION" "$S0_SOLVENT" "ground_state" "$initial_xyz"
             echo "# ${mol} S0 Opt+Freq"
