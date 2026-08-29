@@ -90,6 +90,8 @@ def recorded_actual_orca_version(input_path: Path) -> str | None:
         record = data.get("runtime_provenance", {}).get("orca_versions", {}).get(str(input_path.resolve()), {})
     except (OSError, json.JSONDecodeError):
         return None
+    if record.get("input_sha256") != sha256(input_path):
+        return None
     actual = record.get("actual")
     return actual if isinstance(actual, str) and actual else None
 
@@ -193,7 +195,7 @@ def evaluate(input_path: Path, calc_type: str | None) -> dict:
     exact, similar = observation_matches(text, input_hash, dependency_fingerprints, orca_version)
     for record in exact:
         failures.append({"rule_id": "EXACT_REPEAT_LOCAL_FAILURE", "evidence_level": "LOCAL_OBSERVATION", "message": f"this exact input previously failed under ORCA {orca_version}", "evidence": [record["record_path"], record.get("matched_pattern") or "unclassified failure"], "correct_pattern": {"action": "inspect and modify the input; do not blindly repeat the recorded failure"}})
-    return {"input_path": str(input_path), "input_sha256": input_hash, "dependency_fingerprints": dependency_fingerprints, "orca_version": orca_version, "calculation_type": actual_type, "rules_sha256": rules_hash, "experience_index_sha256": index_sha256(), "consulted_rules": [rule["id"] for rule in rules], "template_candidates": matching_templates(actual_type), "local_observations": local_observations()[:5], "similar_observation_ids": sorted({item["record_sha256"] for item in similar}), "similar_observations_total": len(similar), "similar_observations": similar[:5], "failures": failures, "checked_at": now()}
+    return {"input_path": str(input_path), "input_sha256": input_hash, "dependency_fingerprints": dependency_fingerprints, "orca_version": orca_version, "calculation_type": actual_type, "rules_sha256": rules_hash, "experience_index_sha256": index_sha256(), "consulted_rules": [rule["id"] for rule in rules], "template_candidates": matching_templates(actual_type), "local_observations": local_observations()[:5], "similar_observation_ids": sorted({item["record_sha256"] for item in similar}), "similar_observations_total": len(similar), "similar_observations": similar[:5], "all_similar_observations": similar, "failures": failures, "checked_at": now()}
 
 
 def lookup(calc_type: str) -> dict:
@@ -230,7 +232,7 @@ def require(input_path: Path, manifest_path: Path) -> dict:
         new_ids = sorted(set(similar_ids(result)) - acknowledged)
         if new_ids:
             result["new_similar_observation_ids"] = new_ids
-            result["new_similar_observations"] = [item for item in result["similar_observations"] if item["record_sha256"] in new_ids]
+            result["new_similar_observations"] = [item for item in result["all_similar_observations"] if item["record_sha256"] in new_ids]
             raise ExperienceError(render(result) + f"\n[EXPERIENCE-GATE] EXPERIENCE_WARNING_ACK_REQUIRED: inspect the new similar failure(s), obtain explicit human acknowledgement, then run: python3 {Path(__file__)} acknowledge {input_path} --manifest {manifest_path} --human-acknowledged")
         result["acknowledged_similar_observations"] = sorted(acknowledged)
         for key in ("acknowledged_by", "acknowledged_at"):
@@ -273,7 +275,7 @@ def render(result: dict) -> str:
         lines.append(f"Similar project-local failures (warning; showing {len(result['similar_observations'])} of {result.get('similar_observations_total', len(result['similar_observations']))}):")
         lines += [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["similar_observations"]]
     if result.get("new_similar_observations"):
-        lines.append(f"New similar failures requiring acknowledgement ({len(result.get('new_similar_observation_ids', []))} total; displaying up to five):")
+        lines.append(f"New similar failures requiring acknowledgement ({len(result.get('new_similar_observation_ids', []))} total; all are displayed):")
         lines += [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["new_similar_observations"]]
     if result.get("failures"):
         lines.append("[EXPERIENCE-GATE] KNOWN INVALID PATTERN")

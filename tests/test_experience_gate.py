@@ -102,6 +102,7 @@ class ExperienceGateTests(unittest.TestCase):
         self.assertIn("EXPERIENCE_WARNING_ACK_REQUIRED", str(caught.exception))
         self.assertIn("Similar project-local failures", str(caught.exception))
         self.assertIn("6 total", str(caught.exception))
+        self.assertIn("failed_5.json", str(caught.exception))
         with self.assertRaises(experience_gate.ExperienceError):
             experience_gate.acknowledge(self.input, self.manifest, False)
         acknowledged = experience_gate.acknowledge(self.input, self.manifest, True)
@@ -113,3 +114,12 @@ class ExperienceGateTests(unittest.TestCase):
     def test_detects_orca_version_when_not_configured(self):
         with patch.dict(os.environ, {"ORCA_VERSION": ""}), patch.object(experience_gate.shutil, "which", return_value="/opt/orca/orca"), patch.object(experience_gate.subprocess, "run", return_value=SimpleNamespace(stdout="Program Version 6.1.7\n")):
             self.assertEqual(experience_gate.detected_orca_version(), "6.1.7")
+
+    def test_recorded_output_version_is_bound_to_current_input_hash(self):
+        status = self.work / "cascade_status.json"
+        self.input.write_text("! CAM-B3LYP\n")
+        status.write_text(json.dumps({"runtime_provenance": {"orca_versions": {str(self.input.resolve()): {"input_sha256": experience_gate.sha256(self.input), "actual": "6.1.0"}}}}))
+        with patch.dict(os.environ, {"AUTOORCA_STATUS_FILE": str(status)}):
+            self.assertEqual(experience_gate.recorded_actual_orca_version(self.input), "6.1.0")
+            self.input.write_text("! PBE0\n")
+            self.assertIsNone(experience_gate.recorded_actual_orca_version(self.input))

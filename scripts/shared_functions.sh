@@ -12,19 +12,23 @@ MANUAL_DIR="${MANUAL_DIR:-$ORCA_ROOT/manual/orca_manual_kb}"
 export PATH="$ORCA_ROOT:$PATH"
 export LD_LIBRARY_PATH="$ORCA_ROOT:${LD_LIBRARY_PATH:-}"
 
+resolve_orca_binary() {
+    local executable="${ORCA_BINARY:-$ORCA_ROOT/orca}"
+    if [ ! -x "$executable" ]; then executable=$(command -v orca 2>/dev/null || true); fi
+    [ -n "$executable" ] && realpath "$executable" 2>/dev/null || true
+}
+
 detect_orca_version() {
     local executable output version
-    executable="${ORCA_BINARY:-$ORCA_ROOT/orca}"
-    if [ ! -x "$executable" ]; then
-        executable=$(command -v orca 2>/dev/null || true)
-    fi
+    executable=$(resolve_orca_binary)
     [ -n "$executable" ] || { echo "unknown"; return; }
     output=$("$executable" --version 2>/dev/null || true)
     version=$(printf '%s\n' "$output" | sed -nE 's/.*([Pp]rogram )?[Vv]ersion[[:space:]:=]+([0-9][^[:space:],;)]*).*/\2/p' | head -1)
     echo "${version:-unknown}"
 }
+ORCA_BINARY="${ORCA_BINARY:-$(resolve_orca_binary)}"
 ORCA_VERSION="${ORCA_VERSION:-$(detect_orca_version)}"
-export ORCA_VERSION
+export ORCA_BINARY ORCA_VERSION
 
 WORKDIR="${AUTOORCA_WORKDIR:-$PWD}"
 WORKDIR="$(realpath "$WORKDIR")"
@@ -127,7 +131,7 @@ PYEOF
 
 write_autoorca_metadata() {
     local calc=$1 family=$2 functional=$3 basis=$4 dispersion=$5 solvent=$6 regime=$7 geometry=$8 target=${9:-}
-    echo "# @AUTOORCA: 3.4.4"
+    echo "# @AUTOORCA: 3.4.5"
     echo "# @ORCA: ${ORCA_VERSION}"
     echo "# @CALCULATION_TYPE: ${calc}"
     echo "# @METHOD_FAMILY: ${family}"
@@ -148,17 +152,36 @@ get_orca_output_version() {
     [ -n "$version" ] && echo "$version"
 }
 
+input_declared_orca_version() {
+    local input=$1 version
+    version=$(grep -iE '^\s*#\s*@ORCA:' "$input" | head -1 | sed -E 's/^[^:]*:[[:space:]]*//' || true)
+    echo "${version:-unknown}"
+}
+
+require_orca_version_match() {
+    local input=$1 declared current
+    declared=$(input_declared_orca_version "$input")
+    current=$(detect_orca_version)
+    if [ "$declared" = "unknown" ] || [ "$current" = "unknown" ]; then
+        log "[PROVENANCE-GATE] ORCA_VERSION_REVIEW_REQUIRED: cannot verify declared=$declared against current=$current. Set a resolvable ORCA binary/version, regenerate input metadata, and obtain new human approval."
+        return 6
+    fi
+    if [ "$declared" != "$current" ]; then
+        log "[PROVENANCE-GATE] ORCA_VERSION_REVIEW_REQUIRED: input declares $declared but current binary reports $current. Regenerate metadata and obtain new human approval before execution."
+        return 6
+    fi
+}
+
 record_actual_orca_version() {
     local input=$1 outfile=$2 actual declared
     actual=$(get_orca_output_version "$outfile" || true)
     [ -n "$actual" ] || { log "[PROVENANCE-GATE] ORCA version not found in $outfile"; return 0; }
-    declared=$(grep -iE '^\s*#\s*@ORCA:' "$input" | head -1 | sed -E 's/^[^:]*:[[:space:]]*//' || true)
-    declared=${declared:-$ORCA_VERSION}
+    declared=$(input_declared_orca_version "$input")
     if [ "$declared" != "$actual" ]; then
         log "[PROVENANCE-GATE] ORCA VERSION MISMATCH: input declares $declared; output reports $actual"
     fi
     [ -f "$STATUS_FILE" ] || return 0
-    python3 - "$STATUS_FILE" "$input" "$declared" "$actual" <<'PYEOF' || log "WARNING: failed to record actual ORCA version in status"
+    python3 - "$STATUS_FILE" "$input" "$declared" "$actual" "$ORCA_BINARY" <<'PYEOF' || log "WARNING: failed to record actual ORCA version in status"
 import datetime as dt, json, sys
 from pathlib import Path
 path=Path(sys.argv[1])
@@ -168,8 +191,10 @@ except (OSError, json.JSONDecodeError):
     raise SystemExit(0)
 runtime=data.setdefault("runtime_provenance", {})
 versions=runtime.setdefault("orca_versions", {})
-versions[str(Path(sys.argv[2]).resolve())]={
-    "declared": sys.argv[3], "actual": sys.argv[4],
+input_path=Path(sys.argv[2]).resolve()
+versions[str(input_path)]={
+    "input_sha256": __import__("hashlib").sha256(input_path.read_bytes()).hexdigest(),
+    "declared": sys.argv[3], "actual": sys.argv[4], "binary": sys.argv[5],
     "recorded_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
 }
 path.write_text(json.dumps(data, indent=2)+"\n")
@@ -391,6 +416,7 @@ run_orca() {
     # not trust or post-process a historical completed output without review.
     require_experience_check "$input" || return $?
     require_input_approval "$input" "$outfile" || return $?
+    require_orca_version_match "$input" || return $?
 
     if [ ! -x "$MYORCA" ]; then
         log "ERROR: MYORCA wrapper is not executable: $MYORCA"

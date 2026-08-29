@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.4.4
+version: 3.4.5
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -541,7 +541,7 @@ S0 Opt/Freq -> R0 vertical TD-DFT/NTO -> human STATE_SELECTION_APPROVED
 
 ---
 
-# 20. Experience-consistency gate (v3.4.4)
+# 20. Experience-consistency gate (v3.4.5)
 
 Read `references/experience_memory.md` before constructing any ORCA input. The mandatory order is:
 
@@ -566,5 +566,11 @@ When `EXPERIENCE_WARNING_ACK_REQUIRED` is raised, the executing agent must:
 4. Only then run `experience_gate.py acknowledge input.inp --manifest experience_checks.json --human-acknowledged`.
 
 The executing agent must never acknowledge an experience warning on its own. The acknowledgement record is distinct from input approval and stores `acknowledged_by: human`, `acknowledged_at`, and every matched local-failure record hash. All matching records participate in the gate; command output shows at most five entries plus the total count.
+
+For an acknowledgement-required event, show every newly surfaced similar failure before invoking the acknowledgement command; the five-entry limit applies only to ordinary lookup display.
+
+### ORCA execution-environment gate
+
+Before every launch, compare the input `# @ORCA:` value with the currently resolved ORCA binary version. If unavailable or mismatched, stop with `ORCA_VERSION_REVIEW_REQUIRED`; regenerate the input provenance and obtain a new human input approval. A completed output records its parsed actual version, resolved binary path, and input SHA256 in runtime provenance. Never reuse a prior actual version merely because the input path matches: its SHA256 must also match.
 
 For example, the ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` or `TD-DFT` in the simple `!` line. Use the `%tddft ... end` block instead. Do not repeat a recorded syntax failure merely because an archive was not consulted.

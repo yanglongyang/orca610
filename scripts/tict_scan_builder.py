@@ -80,7 +80,7 @@ def build_input(config: dict) -> str:
     solvent_regime = method.get("solvent_regime", "equilibrium")
     start, end, steps = scan["start_deg"], scan["end_deg"], scan["n_steps"]
     return "\n".join((
-        "# @AUTOORCA: 3.4.4",
+        "# @AUTOORCA: 3.4.5",
         f"# @ORCA: {detected_orca_version()}",
         "# @CALCULATION_TYPE: tict_scan",
         "# @METHOD_FAMILY: TD-DFT",
@@ -90,7 +90,7 @@ def build_input(config: dict) -> str:
         f"# @SOLVENT: {method['solvent']}",
         f"# @SOLVENT_REGIME: {solvent_regime}",
         f"# @GEOMETRY_SOURCE: {config['xyz']}",
-        "# AutoORCA v3.4.4 TICT diagnostic: inspect state identity/NTOs at every scan point.",
+        "# AutoORCA v3.4.5 TICT diagnostic: inspect state identity/NTOs at every scan point.",
         f"! Opt {method['functional']} RIJCOSX {method['basis']} {method['dispersion']} {method['solvent']} TightScf",
         "%geom",
         "  Scan D " + " ".join(map(str, atoms)) + f" = {start}, {end}, {steps} end",
