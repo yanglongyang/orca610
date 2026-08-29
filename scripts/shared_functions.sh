@@ -131,7 +131,7 @@ PYEOF
 
 write_autoorca_metadata() {
     local calc=$1 family=$2 functional=$3 basis=$4 dispersion=$5 solvent=$6 regime=$7 geometry=$8 target=${9:-}
-    echo "# @AUTOORCA: 3.4.5"
+    echo "# @AUTOORCA: 3.4.6"
     echo "# @ORCA: ${ORCA_VERSION}"
     echo "# @CALCULATION_TYPE: ${calc}"
     echo "# @METHOD_FAMILY: ${family}"
@@ -356,16 +356,53 @@ PYEOF
 #------------------------------------------------------------------------------
 # ORCA process helpers
 #------------------------------------------------------------------------------
+# Jobs launched by AutoORCA are identified only by an adjacent PID lock bound to
+# the absolute input path. Never grep the global process table: the runner's
+# own command line can contain both "orca" and a basename, and unrelated
+# projects can legitimately reuse the same filename.
+job_lock_file() { echo "${1%.inp}.autoorca.pid"; }
+
+process_start_token() {
+    local pid=$1 token
+    if [ -r "/proc/$pid/stat" ]; then
+        # Linux starttime (field 22) prevents a stale lock matching a reused PID.
+        token=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null || true)
+    fi
+    if [ -z "$token" ]; then
+        token=$(ps -p "$pid" -o lstart= 2>/dev/null | xargs || true)
+    fi
+    echo "${token:-unavailable}"
+}
+
+write_job_lock() {
+    local input=$1 pid=$2 lock started
+    lock=$(job_lock_file "$input")
+    started=$(process_start_token "$pid")
+    printf '%s\n%s\n%s\n' "$pid" "$(realpath "$input")" "$started" > "$lock"
+}
+
+clear_job_lock() { rm -f "$(job_lock_file "$1")"; }
+
 job_running() {
-    local basename=$1
-    ps aux | grep -v grep | grep -q "orca.*${basename}"
+    local input=$1 lock pid locked_input locked_started current_started
+    input=$(realpath "$input")
+    lock=$(job_lock_file "$input")
+    [ -f "$lock" ] || return 1
+    IFS= read -r pid < "$lock" || { rm -f "$lock"; return 1; }
+    IFS= read -r locked_input < <(sed -n '2p' "$lock") || { rm -f "$lock"; return 1; }
+    IFS= read -r locked_started < <(sed -n '3p' "$lock") || { rm -f "$lock"; return 1; }
+    current_started=$(process_start_token "$pid")
+    if ! [[ "$pid" =~ ^[0-9]+$ ]] || [ "$locked_input" != "$input" ] || [ -z "$locked_started" ] || [ "$locked_started" != "$current_started" ] || ! kill -0 "$pid" 2>/dev/null; then
+        rm -f "$lock"; return 1
+    fi
+    return 0
 }
 
 wait_for_job() {
-    local basename=$1
-    if job_running "$basename"; then
+    local input=$1 basename="${1%.inp}"
+    if job_running "$input"; then
         log "Waiting for running job: $basename ..."
-        while job_running "$basename"; do sleep 300; done
+        while job_running "$input"; do sleep 300; done
         sleep 5
         log "$basename finished."
     fi
@@ -408,7 +445,8 @@ ERROR_PATTERNS=(
 )
 
 run_orca() {
-    local input=$1
+    local input
+    input=$(realpath "$1")
     local basename="${input%.inp}"
     local outfile="${basename}.out"
 
@@ -423,7 +461,7 @@ run_orca() {
         return 1
     fi
 
-    wait_for_job "$basename"
+    wait_for_job "$input"
     if orca_done "$outfile"; then
         log "Already completed: $basename — skipping"
         return 0
@@ -439,6 +477,7 @@ run_orca() {
     log "Starting: $MYORCA $input"
     "$MYORCA" "$input" &
     local orca_pid=$!
+    write_job_lock "$input" "$orca_pid"
     local check_interval="${ORCA_CHECK_INTERVAL:-300}"
     local stall_count=0 last_size=0 check_num=0 stall_reported=0
     local max_stalls="${ORCA_MAX_STALLS:-4}"
@@ -475,6 +514,7 @@ run_orca() {
     done
 
     wait "$orca_pid" 2>/dev/null || true
+    clear_job_lock "$input"
     if orca_done "$outfile"; then
         record_actual_orca_version "$input" "$outfile"
         mark_input_lifecycle "$input" "COMPLETED" || return $?

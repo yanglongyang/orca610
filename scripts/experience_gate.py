@@ -178,6 +178,14 @@ def save_manifest(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def resolve_manifest(input_path: Path, supplied: str | None) -> Path:
+    if supplied:
+        return Path(supplied)
+    if os.environ.get("EXPERIENCE_GATE_FILE"):
+        return Path(os.environ["EXPERIENCE_GATE_FILE"])
+    return input_path.resolve().parent / "experience_checks.json"
+
+
 def evaluate(input_path: Path, calc_type: str | None) -> dict:
     input_path = input_path.resolve()
     if not input_path.is_file(): raise ExperienceError(f"input does not exist: {input_path}")
@@ -300,7 +308,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("lookup", "check", "require", "acknowledge", "record-failure"))
     parser.add_argument("input", nargs="?")
-    parser.add_argument("--manifest", default="experience_checks.json")
+    parser.add_argument("--manifest", help="defaults to EXPERIENCE_GATE_FILE or input directory")
     parser.add_argument("--calculation-type")
     parser.add_argument("--output")
     parser.add_argument("--pattern")
@@ -315,9 +323,12 @@ def main() -> None:
         elif args.command == "record-failure":
             if not args.output: raise ExperienceError("record-failure requires --output")
             print(f"[EXPERIENCE] local failure recorded: {record_failure(args)}")
-        elif args.command == "check": print(render(check(Path(args.input), Path(args.manifest), args.calculation_type)))
-        elif args.command == "acknowledge": print(render(acknowledge(Path(args.input), Path(args.manifest), args.human_acknowledged)))
-        else: print("[EXPERIENCE-GATE] VERIFIED: " + require(Path(args.input), Path(args.manifest))["input_path"])
+        elif args.command == "check":
+            path = Path(args.input); print(render(check(path, resolve_manifest(path, args.manifest), args.calculation_type)))
+        elif args.command == "acknowledge":
+            path = Path(args.input); print(render(acknowledge(path, resolve_manifest(path, args.manifest), args.human_acknowledged)))
+        else:
+            path = Path(args.input); print("[EXPERIENCE-GATE] VERIFIED: " + require(path, resolve_manifest(path, args.manifest))["input_path"])
     except ExperienceError as exc:
         print(str(exc), file=sys.stderr); raise SystemExit(EXPERIENCE_EXIT)
 

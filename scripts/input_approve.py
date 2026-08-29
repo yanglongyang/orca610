@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from input_review import ReviewError, load_manifest, now, same_snapshot, save_manifest, snapshot
+from input_review import ReviewError, load_manifest, now, resolve_manifest, same_snapshot, save_manifest, snapshot
 
 
 def approve(input_path: Path, manifest_path: Path) -> dict:
@@ -30,10 +30,11 @@ def approve(input_path: Path, manifest_path: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input")
-    parser.add_argument("--manifest", default="input_reviews.json")
+    parser.add_argument("--manifest", help="defaults to INPUT_REVIEW_FILE or input directory")
     args = parser.parse_args()
     try:
-        record = approve(Path(args.input), Path(args.manifest))
+        input_path = Path(args.input)
+        record = approve(input_path, resolve_manifest(input_path, args.manifest))
     except ReviewError as exc:
         print(f"[REVIEW-GATE] APPROVAL REFUSED: {exc}", file=sys.stderr)
         raise SystemExit(2)

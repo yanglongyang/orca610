@@ -1,8 +1,8 @@
-# AutoORCA 3.4.5 — Experience-, State-, and Review-Gated Photophysics
+# AutoORCA 3.4.6 — Experience-, State-, and Review-Gated Photophysics
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.5 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. The v3.1.1 fluorescence-probe analysis layer remains included.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.6 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. The v3.1.1 fluorescence-probe analysis layer remains included.
 
 ## Repository layout
 
@@ -113,6 +113,8 @@ python3 /path/to/orca610/scripts/input_approve.py MOL1_S0_OptFreq.inp
 Approval is bound to the input SHA256 and hashes for `xyzfile`, `moinp`, `GSHessian`, and `ESHessian` dependencies. Any edit invalidates approval and requires a new review. There is deliberately no global, silent, or auto-approval switch.
 
 The gate is checked before an existing ORCA job or completed `.out` is trusted. Historical outputs with no v3.2 review are labelled `IMPORTED_UNREVIEWED`; reviewing them now permits transparent use, but never retroactively claims pre-run approval. For standalone TICT generation outside `$AUTOORCA_WORKDIR`, pass `--manifest "$INPUT_REVIEW_FILE"` (or export that variable) so it shares the workflow manifest.
+
+Runner jobs use an adjacent PID lock bound to the absolute input path, not a global `ps | grep` pattern. Thus an installation path containing `orca`, or a same-named input in another project, cannot make the runner wait on itself or an unrelated project. Standalone `review`, `approve`, and `run_reviewed_input.sh` commands default manifests to the input directory, avoiding cwd-dependent split-brain manifests.
 
 For TD-DFT fluorescence workflows, AutoORCA next produces a reviewed R0 vertical absorption/NTO input. After it completes, select the desired per-molecule electronic state explicitly before S1 optimization:
 

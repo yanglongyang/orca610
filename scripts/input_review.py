@@ -251,6 +251,15 @@ def save_manifest(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2) + "\n")
 
 
+def resolve_manifest(input_path: Path, supplied: str | None) -> Path:
+    """Keep standalone review, approval, and execution on one input-scoped manifest."""
+    if supplied:
+        return Path(supplied)
+    if os.environ.get("INPUT_REVIEW_FILE"):
+        return Path(os.environ["INPUT_REVIEW_FILE"])
+    return input_path.resolve().parent / "input_reviews.json"
+
+
 def same_snapshot(record: dict, current: dict) -> bool:
     return record.get("input_sha256") == current["input_sha256"] and record.get("dependencies") == current["dependencies"]
 
@@ -349,12 +358,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("review", "require", "reject", "mark-running", "mark-completed"))
     parser.add_argument("input")
-    parser.add_argument("--manifest", default="input_reviews.json")
+    parser.add_argument("--manifest", help="defaults to INPUT_REVIEW_FILE or input directory")
     parser.add_argument("--calculation-type")
     parser.add_argument("--existing-completed-output", action="store_true", help="record an existing completed output as imported rather than pre-approved")
     args = parser.parse_args()
     try:
-        path, manifest = Path(args.input), Path(args.manifest)
+        path = Path(args.input); manifest = resolve_manifest(path, args.manifest)
         if args.command == "review":
             print(_render(review(path, manifest, args.calculation_type, args.existing_completed_output)))
         elif args.command == "require":

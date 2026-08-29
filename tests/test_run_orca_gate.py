@@ -13,9 +13,9 @@ class RunOrcaGateTests(unittest.TestCase):
         body = text[start:end]
         approval = body.index('require_input_approval "$input" "$outfile"')
         self.assertLess(body.index('require_experience_check "$input"'), approval)
-        self.assertLess(approval, body.index('wait_for_job "$basename"'))
+        self.assertLess(approval, body.index('wait_for_job "$input"'))
         self.assertLess(approval, body.index('if orca_done "$outfile"'))
-        self.assertLess(body.index('require_orca_version_match "$input"'), body.index('wait_for_job "$basename"'))
+        self.assertLess(body.index('require_orca_version_match "$input"'), body.index('wait_for_job "$input"'))
 
     def test_actual_orca_version_is_parsed_from_output_and_recorded(self):
         text = (ROOT / "scripts" / "shared_functions.sh").read_text(encoding="utf-8")

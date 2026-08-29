@@ -42,6 +42,9 @@ class InputReviewTests(unittest.TestCase):
         record = input_review.require(self.input, self.manifest)
         self.assertEqual(record["status"], "APPROVED")
 
+    def test_standalone_manifest_default_is_input_scoped(self):
+        self.assertEqual(input_review.resolve_manifest(self.input, None), self.input.parent / "input_reviews.json")
+
     def test_rejected_input_cannot_run(self):
         input_review.review(self.input, self.manifest, "vertical_absorption")
         record = input_review.reject(self.input, self.manifest)

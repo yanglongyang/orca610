@@ -67,6 +67,9 @@ class ExperienceGateTests(unittest.TestCase):
         self.assertEqual(result["calculation_type"], "s1_opt")
         self.assertIn("experience_index_sha256", result)
 
+    def test_standalone_manifest_default_is_input_scoped(self):
+        self.assertEqual(experience_gate.resolve_manifest(self.input, None), self.input.parent / "experience_checks.json")
+
     def test_evidence_index_change_refreshes_unchanged_input(self):
         self.input.write_text("! CAM-B3LYP\n")
         original = experience_gate.check(self.input, self.manifest, "s0_optfreq")

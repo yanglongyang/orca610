@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.4.5
+version: 3.4.6
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -568,6 +568,10 @@ When `EXPERIENCE_WARNING_ACK_REQUIRED` is raised, the executing agent must:
 The executing agent must never acknowledge an experience warning on its own. The acknowledgement record is distinct from input approval and stores `acknowledged_by: human`, `acknowledged_at`, and every matched local-failure record hash. All matching records participate in the gate; command output shows at most five entries plus the total count.
 
 For an acknowledgement-required event, show every newly surfaced similar failure before invoking the acknowledgement command; the five-entry limit applies only to ordinary lookup display.
+
+### AutoORCA software incidents are source fixes, not input experience rules
+
+When a reproducible defect is in AutoORCA's own runner, manifest handling, parser, or gate logic, fix and regression-test the repository source first. Preserve it separately as an engineering incident with trigger, root cause, and fix commit. Do not add a scientific-input experience rule as a substitute for repairing deterministic AutoORCA software.
 
 ### ORCA execution-environment gate
 
