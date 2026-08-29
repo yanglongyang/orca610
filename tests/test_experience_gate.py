@@ -65,3 +65,23 @@ class ExperienceGateTests(unittest.TestCase):
         result = experience_gate.lookup("s1_opt")
         self.assertEqual(result["calculation_type"], "s1_opt")
         self.assertIn("experience_index_sha256", result)
+
+    def test_evidence_index_change_refreshes_unchanged_input(self):
+        self.input.write_text("! CAM-B3LYP\n")
+        original = experience_gate.check(self.input, self.manifest, "s0_optfreq")
+        case_dir = Path(os.environ["AUTOORCA_EXPERIENCE_CASE_DIR"]); case_dir.mkdir(parents=True)
+        (case_dir / "unrelated.json").write_text(json.dumps({"input_sha256": "unrelated", "orca_version": "6.1.0"}))
+        refreshed = experience_gate.require(self.input, self.manifest)
+        self.assertNotEqual(original["experience_index_sha256"], refreshed["experience_index_sha256"])
+        self.assertIn("refreshed_at", refreshed)
+
+    def test_dependency_change_is_related_warning_not_exact_failure(self):
+        xyz = self.work / "geometry.xyz"; xyz.write_text("1\nold\nH 0 0 0\n")
+        self.input.write_text("# @ORCA: 6.1.0\n! CAM-B3LYP\n* xyzfile 0 1 geometry.xyz\n")
+        output = self.work / "job.out"; output.write_text("INPUT ERROR\n")
+        case_dir = self.work / "experience" / "cases" / "failure"
+        experience_gate.record_failure(SimpleNamespace(input=str(self.input), output=str(output), pattern="INPUT ERROR", case_dir=str(case_dir), orca_version="6.1.0"))
+        xyz.write_text("1\nrepaired\nH 0 0 0.1\n")
+        result = experience_gate.check(self.input, self.manifest, "s0_optfreq")
+        self.assertFalse(result["failures"])
+        self.assertTrue(result["similar_observations"])

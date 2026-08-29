@@ -115,10 +115,12 @@ def metadata(text: str) -> dict[str, str]:
     return {match.group(1).upper(): match.group(2).strip() for match in re.finditer(r"^\s*#\s*@([A-Z0-9_]+):\s*(.+)$", text, re.I | re.M)}
 
 
-def observation_matches(text: str, input_hash: str, orca_version: str) -> tuple[list[dict], list[dict]]:
+def observation_matches(text: str, input_hash: str, dependency_fingerprints: list[dict], orca_version: str) -> tuple[list[dict], list[dict]]:
     exact, similar = [], []
     for record in local_observations():
-        if record.get("input_sha256") == input_hash and record.get("orca_version") == orca_version:
+        if (record.get("input_sha256") == input_hash
+                and record.get("dependency_fingerprints") == dependency_fingerprints
+                and record.get("orca_version") == orca_version):
             exact.append(record); continue
         prior = record.get("input_text")
         if prior and SequenceMatcher(None, text, prior).ratio() >= 0.85:
@@ -148,12 +150,13 @@ def evaluate(input_path: Path, calc_type: str | None) -> dict:
                 failures.append({"rule_id": rule["id"], "evidence_level": rule.get("evidence_level"), "message": pattern["message"], "evidence": rule.get("evidence", []), "correct_pattern": rule.get("correct_pattern", {})})
     actual_type = calculation_type(text, calc_type)
     input_hash = sha256(input_path)
+    dependency_fingerprints = dependencies(input_path, text)
     input_metadata = metadata(text)
     orca_version = input_metadata.get("ORCA", os.environ.get("ORCA_VERSION", "unspecified"))
-    exact, similar = observation_matches(text, input_hash, orca_version)
+    exact, similar = observation_matches(text, input_hash, dependency_fingerprints, orca_version)
     for record in exact:
         failures.append({"rule_id": "EXACT_REPEAT_LOCAL_FAILURE", "evidence_level": "LOCAL_OBSERVATION", "message": f"this exact input previously failed under ORCA {orca_version}", "evidence": [record["record_path"], record.get("matched_pattern") or "unclassified failure"], "correct_pattern": {"action": "inspect and modify the input; do not blindly repeat the recorded failure"}})
-    return {"input_path": str(input_path), "input_sha256": input_hash, "orca_version": orca_version, "calculation_type": actual_type, "rules_sha256": rules_hash, "experience_index_sha256": index_sha256(), "consulted_rules": [rule["id"] for rule in rules], "template_candidates": matching_templates(actual_type), "local_observations": local_observations()[:5], "similar_observations": similar[:5], "failures": failures, "checked_at": now()}
+    return {"input_path": str(input_path), "input_sha256": input_hash, "dependency_fingerprints": dependency_fingerprints, "orca_version": orca_version, "calculation_type": actual_type, "rules_sha256": rules_hash, "experience_index_sha256": index_sha256(), "consulted_rules": [rule["id"] for rule in rules], "template_candidates": matching_templates(actual_type), "local_observations": local_observations()[:5], "similar_observations": similar[:5], "failures": failures, "checked_at": now()}
 
 
 def lookup(calc_type: str) -> dict:
@@ -169,11 +172,21 @@ def check(input_path: Path, manifest_path: Path, calc_type: str | None) -> dict:
 
 
 def require(input_path: Path, manifest_path: Path) -> dict:
-    result = evaluate(input_path, None); manifest = load_manifest(manifest_path)
+    manifest = load_manifest(manifest_path)
+    existing = manifest["inputs"].get(str(input_path.resolve()))
+    result = evaluate(input_path, existing.get("calculation_type") if existing else None)
     record = manifest["inputs"].get(result["input_path"])
     if result["failures"]: raise ExperienceError(render(result))
-    if not record or record.get("input_sha256") != result["input_sha256"] or record.get("experience_index_sha256") != result["experience_index_sha256"]:
+    if not record or record.get("input_sha256") != result["input_sha256"]:
         raise ExperienceError("EXPERIENCE_CHECK_REQUIRED: generate/review this input again so current rules and precedents are consulted.")
+    if record.get("experience_index_sha256") != result["experience_index_sha256"]:
+        # Evidence has changed but this exact scientific input has not. Re-evaluate
+        # above, refuse any new hard evidence, otherwise refresh only the
+        # experience record. Input-review approval remains independently hash-bound.
+        result["refreshed_at"] = now()
+        manifest["inputs"][result["input_path"]] = result
+        save_manifest(manifest_path, manifest)
+        return result
     return record
 
 
