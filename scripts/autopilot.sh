@@ -15,6 +15,8 @@ run_phase() {
         rc=$?
         if [ "$rc" -eq 3 ]; then
             log "AUTOPILOT STOPPED: REVIEW_REQUIRED. Approve the displayed exact input, then restart autopilot."
+        elif [ "$rc" -eq 4 ]; then
+            log "AUTOPILOT STOPPED: STATE GATE REQUIRED. Select/confirm the electronic state, then restart autopilot."
         fi
         return "$rc"
     fi

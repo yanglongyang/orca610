@@ -13,6 +13,9 @@ path=sys.argv[1]
 with open(path) as f: data=json.load(f)
 
 for mol,m in data.get("molecules",{}).items():
+    if m.get("s1_converged") and m.get("state_identity_checked") is not True:
+        print(f"[STATE-GATE] {mol}: S1 state identity is not human-confirmed; report generation refused.", file=sys.stderr)
+        sys.exit(4)
     fosc=float(m.get("s1_f_osc") or 0)
     wn=float(m.get("s1_energy_cm1") or 0)
     kic=float(m.get("k_ic") or 0)

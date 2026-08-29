@@ -24,15 +24,12 @@ for mol in "${MOLECULES[@]}"; do
 
     if [ ! -f "$inp" ]; then
         {
+            write_autoorca_metadata "s0_optfreq" "DFT" "$S0_FUNCTIONAL" "$S0_BASIS" "$S0_DISPERSION" "$S0_SOLVENT" "ground_state" "$initial_xyz"
             echo "# ${mol} S0 Opt+Freq"
             echo "! Opt Freq ${S0_FUNCTIONAL} RIJCOSX ${S0_BASIS} ${S0_DISPERSION} ${S0_SOLVENT} TightOpt TightScf"
             echo "%maxcore ${MAXCORE}"
             echo "%pal nprocs ${NPROCS} end"
-            echo "* xyz ${CHARGE} ${MULT}"
-            tail -n +3 "$initial_xyz"
-            # Ensure the inline geometry terminator is on its own line even if
-            # a user-supplied XYZ file lacks a trailing newline.
-            printf '\n*\n'
+            echo "* xyzfile ${CHARGE} ${MULT} \"${initial_xyz}\""
         } > "$inp"
         register_input_for_review "$inp" "s0_optfreq" || exit 1
         log "Generated $inp — REVIEW_REQUIRED. No ORCA job was started; inspect the complete review and explicitly approve this exact input."

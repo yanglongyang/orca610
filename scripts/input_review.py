@@ -97,8 +97,12 @@ def _method_details(method_line: str | None) -> dict:
     tokens = (method_line or "").lstrip("!").split()
     basis = next((token for token in tokens if re.match(r"(?:ma-)?(?:def2|cc-p|aug-|6-)" , token, re.I)), None)
     dispersion = next((token for token in tokens if re.fullmatch(r"D(?:3(?:BJ|ZERO)?|4)", token, re.I)), None)
-    functional = next((token for token in tokens if token not in {basis, dispersion} and not re.match(r"(?:Opt|Freq|Tight|CPCM|SMD|ESD|RI|Grid|SlowConv|NoAutoStart)", token, re.I)), None)
+    functional = next((token for token in tokens if token not in {basis, dispersion} and not re.match(r"(?:TDDFT|TD-DFT|CIS|Opt|Freq|Tight|CPCM|SMD|ESD|RI|Grid|SlowConv|NoAutoStart)", token, re.I)), None)
     return {"functional": functional, "basis": basis, "dispersion": dispersion}
+
+
+def _metadata(text: str) -> dict[str, str]:
+    return {match.group(1).lower(): match.group(2).strip() for match in re.finditer(r"^\s*#\s*@([A-Z0-9_]+):\s*(.*?)\s*$", text, re.I | re.M)}
 
 
 def _state_marker(value: str | None) -> str | None:
@@ -124,9 +128,10 @@ def semantic_summary(input_path: Path, text: str, dep_list: list[dict], calculat
     tddft, esd, pal = _block(text, "tddft"), _block(text, "esd"), _block(text, "pal")
     maxcore = re.search(r"^\s*%maxcore\s+(\S+)", text, re.I | re.M)
     solvent = re.search(r"\b(?:CPCM|SMD)\([^)]*\)", text, re.I)
+    metadata = _metadata(text)
     summary: dict = {
-        "input_file": str(input_path), "calculation_type": calculation_type,
-        "purpose": next((line[1:].strip() for line in text.splitlines() if line.startswith("#")), None),
+        "input_file": str(input_path), "calculation_type": metadata.get("calculation_type", calculation_type),
+        "purpose": next((line[1:].strip() for line in text.splitlines() if line.startswith("#") and not line.lstrip().startswith("# @")), None),
         "method_line": method_line, "geometry_source": "inline xyz" if geometry and geometry.group(1).lower() == "xyz" else None,
         "charge": geometry.group(2) if geometry else None,
         "multiplicity": geometry.group(3) if geometry else None,
@@ -140,6 +145,10 @@ def semantic_summary(input_path: Path, text: str, dep_list: list[dict], calculat
         "esd": {key: _value(esd, key) for key in ("gshessian", "eshessian", "usej") if _value(esd, key) is not None},
     }
     summary.update(_method_details(method_line))
+    for field in ("functional", "basis", "dispersion", "method_family", "solvent", "solvent_regime", "geometry_source", "target_state"):
+        if metadata.get(field):
+            summary[field] = metadata[field]
+    summary["metadata"] = metadata
     summary["esd"]["nacme"] = _value(tddft, "nacme")
     summary["esd"]["etf"] = _value(tddft, "etf")
     if summary["geometry_source"] is None:
@@ -155,8 +164,12 @@ def warnings(summary: dict, dep_list: list[dict]) -> list[str]:
         result.append("TDA true: confirm that the TDA approximation is intended.")
     if td.get("cpcmeq") is not None:
         result.append(f"CPCMEQ {td['cpcmeq']}: confirm the excited-state solvent regime is intended.")
+    elif summary.get("method_family", "").upper() == "TD-DFT":
+        result.append("TD-DFT solvent regime is implicit: write CPCMEQ explicitly for AutoORCA provenance.")
     if summary["optimization"] and td and td.get("followiroot", "").lower() != "true":
         result.append("excited-state optimization without FOLLOWIROOT true.")
+    if summary.get("calculation_type") == "s1_opt" and not summary.get("target_state"):
+        result.append("AutoORCA S1 optimization lacks an approved R0 target-state provenance tag.")
     try:
         if td.get("iroot") and td.get("nroots") and int(td["iroot"]) > int(td["nroots"]):
             result.append("IROOT exceeds NRoots.")
@@ -172,7 +185,7 @@ def warnings(summary: dict, dep_list: list[dict]) -> list[str]:
     if "ESD(IC)" in (summary.get("method_line") or "") and (not summary["esd"].get("gshessian") or not summary["esd"].get("eshessian")):
         result.append("ESD(IC) input lacks an explicit GS or ES Hessian.")
     geometry_state = _state_marker(summary.get("geometry_source"))
-    expected_state = {"vertical_absorption": "S0", "s1_optfreq": "S0", "vertical_emission": "S1", "esd_ic": "S0"}.get(summary.get("calculation_type"))
+    expected_state = {"vertical_absorption": "S0", "s1_opt": "S0", "s1_freq": "S1", "vertical_emission": "S1", "esd_ic": "S0"}.get(summary.get("calculation_type"))
     if geometry_state and expected_state and geometry_state != expected_state:
         result.append(f"geometry provenance appears to be {geometry_state}, but {summary['calculation_type']} normally uses {expected_state} geometry.")
     gs_state = _state_marker(summary["esd"].get("gshessian"))
@@ -247,6 +260,8 @@ def _render(record: dict, include_raw: bool = True) -> str:
     lines = ["PRE-RUN INPUT REVIEW", "", f"Status: {record['status']}", f"File: {summary['input_file']}", f"Purpose: {summary.get('purpose') or summary.get('calculation_type') or 'not recorded'}", f"Method: {summary.get('method_line')}", f"Geometry: {summary.get('geometry_source')} | atoms={summary.get('atom_count')} | charge={summary.get('charge')} multiplicity={summary.get('multiplicity')}"]
     if summary.get("solvent"):
         lines.append(f"Solvent: {summary['solvent']}")
+    if summary.get("method_family") or summary.get("solvent_regime") or summary.get("target_state"):
+        lines.append(f"Provenance: family={summary.get('method_family')} solvent_regime={summary.get('solvent_regime')} target_state={summary.get('target_state')}")
     lines.append(f"Geometry task: Opt={summary['optimization']} Freq={summary['frequency']} TightOpt={summary['tightopt']}")
     if summary["tddft"]:
         lines.append("TD-DFT: " + ", ".join(f"{k}={v}" for k, v in summary["tddft"].items()))

@@ -1,8 +1,8 @@
-# AutoORCA 3.2.0 — Review-Gated Photophysics Workflows
+# AutoORCA 3.3.0 — State-Selected, Review-Gated Photophysics
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.2.0 adds a mandatory human pre-run review gate: every generated ORCA input and its external dependencies are hash-bound to an explicit approval before execution. The v3.1.1 fluorescence-probe analysis layer remains included.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.3.0 adds human state-selection and post-optimization state-identity gates on top of v3.2 hash-bound input approval. The v3.1.1 fluorescence-probe analysis layer remains included.
 
 ## Repository layout
 
@@ -32,6 +32,8 @@ The 3.0 revision added scientific guardrails missing from the early version. Ver
 │   ├── fluorescence_probe_report.py # evidence-ranked Markdown + JSON report
 │   ├── input_review.py               # review summary + SHA256 dependency manifest
 │   └── input_approve.py              # records explicit human approval only
+│   ├── state_gate.py                 # human R0 selection and S1 identity confirmation
+│   └── run_reviewed_input.sh         # reviewed runner for ad-hoc calculations
 │   └── autopilot.sh
 └── templates/
     ├── s0_opt_freq_camb3lyp_631gd.inp
@@ -95,7 +97,7 @@ export ORCA_VERSION=6.1.0
 AUTOORCA_WORKDIR="$PWD" bash /path/to/orca610/scripts/autopilot.sh
 ```
 
-## Mandatory pre-run review (v3.2)
+## Mandatory pre-run review and state selection (v3.3)
 
 Newly generated inputs never start ORCA immediately. AutoORCA records `REVIEW_REQUIRED`, prints a semantic summary plus the complete raw input, and stops. After inspecting that exact input and explicitly deciding to run it, record the human approval:
 
@@ -111,6 +113,28 @@ Approval is bound to the input SHA256 and hashes for `xyzfile`, `moinp`, `GSHess
 
 The gate is checked before an existing ORCA job or completed `.out` is trusted. Historical outputs with no v3.2 review are labelled `IMPORTED_UNREVIEWED`; reviewing them now permits transparent use, but never retroactively claims pre-run approval. For standalone TICT generation outside `$AUTOORCA_WORKDIR`, pass `--manifest "$INPUT_REVIEW_FILE"` (or export that variable) so it shares the workflow manifest.
 
+For TD-DFT fluorescence workflows, AutoORCA next produces a reviewed R0 vertical absorption/NTO input. After it completes, select the desired per-molecule electronic state explicitly before S1 optimization:
+
+```bash
+python3 /path/to/orca610/scripts/state_gate.py select \
+  --manifest state_gates.json --species MOL1 \
+  --vertical-input MOL1_R0_Absorption.inp --vertical-output MOL1_R0_Absorption.out \
+  --root 2 --state-character "donor-to-acceptor ICT" \
+  --selection-basis NTO --selection-basis oscillator_strength --selection-basis excitation_energy
+```
+
+S1 optimization always writes `FOLLOWIROOT true`, uses the selected root, and is separate from optional S1 frequency work (`S1_FREQUENCY=true`). After S1 optimization, confirm the state at the optimized geometry before emission, ESD, or reporting:
+
+```bash
+python3 /path/to/orca610/scripts/state_gate.py confirm \
+  --manifest state_gates.json --species MOL1 \
+  --opt-input MOL1_S1_Opt.inp --opt-output MOL1_S1_Opt.out \
+  --final-root 2 --state-character "donor-to-acceptor ICT" \
+  --evidence NTO --evidence oscillator_strength --evidence excitation_energy
+```
+
+Use `scripts/run_reviewed_input.sh input.inp` for ad-hoc AutoORCA inputs; never call ORCA or its wrapper directly.
+
 ## Current cascade
 
 ```text
@@ -118,10 +142,11 @@ Phase 1  S0 Opt+Freq
          -> convergence + imaginary-frequency gate
          -> S0 geometry/Hessian + method provenance
 
-Phase 2  S1 Opt+Freq
-         -> FOLLOWIROOT + NTO generation
-         -> S1 minimum/Hessian gate
-         -> separate clean vertical-emission SP at final S1 geometry
+Phase 2  R0 vertical TD-DFT + NTO
+         -> human state-selection gate
+         -> S1 Opt with FOLLOWIROOT true
+         -> human final state-identity gate
+         -> optional S1 Freq and clean vertical-emission SP
 
 Phase 3  ESD(IC)
          -> method-compatibility gate for S0/S1 Hessians

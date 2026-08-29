@@ -129,6 +129,16 @@ class InputReviewTests(unittest.TestCase):
         self.assertIn("geometry provenance appears to be S1", "\n".join(record["warnings"]))
         self.assertIn("GSHessian (S0) provenance markers differ", "\n".join(record["warnings"]))
 
+    def test_tddft_token_is_not_misidentified_as_the_functional(self):
+        self.input.write_text(
+            "# @METHOD_FAMILY: TD-DFT\n# @FUNCTIONAL: CAM-B3LYP\n# @BASIS: def2-SVP\n"
+            "! Opt TDDFT CAM-B3LYP RIJCOSX def2-SVP D3BJ CPCM(Water)\n"
+            "%tddft\n iroot 1\n nroots 3\n followiroot true\n cpcmeq true\nend\n* xyzfile 0 1 geometry.xyz\n"
+        )
+        record = input_review.review(self.input, self.manifest, "s1_opt")
+        self.assertEqual(record["summary"]["functional"], "CAM-B3LYP")
+        self.assertEqual(record["summary"]["method_family"], "TD-DFT")
+
 
 if __name__ == "__main__":
     unittest.main()

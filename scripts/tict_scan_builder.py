@@ -75,9 +75,20 @@ def build_input(config: dict) -> str:
             raise TictInputError(f"method lacks {key}")
     ntostates = method.get("nto_states", method["iroot"])
     ntothresh = method.get("nto_threshold", "1e-4")
+    cpcmeq = str(method.get("cpcmeq", True)).lower()
+    solvent_regime = method.get("solvent_regime", "equilibrium")
     start, end, steps = scan["start_deg"], scan["end_deg"], scan["n_steps"]
     return "\n".join((
-        "# AutoORCA v3.2 TICT diagnostic: inspect state identity/NTOs at every scan point.",
+        "# @AUTOORCA: 3.3.0",
+        "# @CALCULATION_TYPE: tict_scan",
+        "# @METHOD_FAMILY: TD-DFT",
+        f"# @FUNCTIONAL: {method['functional']}",
+        f"# @BASIS: {method['basis']}",
+        f"# @DISPERSION: {method['dispersion']}",
+        f"# @SOLVENT: {method['solvent']}",
+        f"# @SOLVENT_REGIME: {solvent_regime}",
+        f"# @GEOMETRY_SOURCE: {config['xyz']}",
+        "# AutoORCA v3.3 TICT diagnostic: inspect state identity/NTOs at every scan point.",
         f"! Opt {method['functional']} RIJCOSX {method['basis']} {method['dispersion']} {method['solvent']} TightScf",
         "%geom",
         "  Scan D " + " ".join(map(str, atoms)) + f" = {start}, {end}, {steps} end",
@@ -87,6 +98,7 @@ def build_input(config: dict) -> str:
         f"  iroot {method['iroot']}",
         f"  tda {str(method['tda']).lower()}",
         f"  followiroot {str(method.get('followiroot', True)).lower()}",
+        f"  cpcmeq {cpcmeq}",
         "  donto true",
         f"  ntostates {ntostates}",
         f"  ntothresh {ntothresh}",

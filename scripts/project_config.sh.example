@@ -22,12 +22,19 @@ S1_BASIS="def2-SVP"
 S1_DISPERSION="D3BJ"
 S1_SOLVENT="CPCM(Water)"
 S1_TDA=false
-NROOTS=5
-IROOT=1
+# AutoORCA-generated singlet TD-DFT optimizations must follow state character.
+# Changing this to false requires an explicit scientific rationale in review.
 FOLLOW_IROOT=true
+FOLLOW_IROOT_RATIONALE=""  # required only for an explicit user-requested false override
+# Write CPCMEQ explicitly; do not rely on an ORCA implicit solvent default.
+ABS_CPCMEQ=false
+S1_CPCMEQ=true
+# Keep false unless ZPE/E00, AH ESD, vibronic analysis, or S1-minimum validation needs it.
+S1_FREQUENCY=false
+NROOTS=5
 # ORCA 6.1 NTO controls. NTO states are explicit so state character can be
 # compared across R0/R1; do not treat ordinal roots as state identity.
-NTO_STATES="${NTO_STATES:-$IROOT}"
+NTO_STATES="${NTO_STATES:-1,2,3,4,5}"
 NTO_THRESH="${NTO_THRESH:-1e-4}"
 
 # Final vertical-emission single point. Geometry may come from the S1 level above;

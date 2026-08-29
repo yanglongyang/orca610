@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.2.0
+version: 3.3.0
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -19,6 +19,7 @@ This skill automates **process without relaxing physical consistency**. A calcul
 7. **Use the ORCA manual as the syntax authority.** Treat local observations as local until confirmed by the manual/changelog.
 8. **Do not choose a method because it gives the expected answer.** Agreement with a desired color, wavelength, or literature value is evidence to evaluate, not a criterion for method selection.
 9. **Respect computational resources.** Parallelism, `%MaxCore`, scratch, and queueing must reflect the actual machine.
+10. **Never let an ordinal root choose the science.** A human selects the R0 state from energy/oscillator-strength/NTO evidence and confirms its identity after S1 optimization.
 
 ---
 
@@ -516,3 +517,23 @@ For every generated or modified `.inp`:
 5. Rerun the phase or autopilot. `run_orca()` independently verifies approval immediately before launching ORCA.
 
 Never self-approve, infer approval from silence, or add an auto-approval/global-approval bypass. A verified template is not execution approval for a molecule-specific instance. Changes to an input or known external dependency (`xyzfile`, `moinp`, `GSHessian`, `ESHessian`) invalidate approval and require a new review. Existing completed outputs with no review record are `IMPORTED_UNREVIEWED`: review can authorize their transparent use, but never retroactively prove pre-run approval.
+
+---
+
+# 19. State-selection and provenance gates (v3.3)
+
+For an AutoORCA TD-DFT singlet-state workflow, use this mandatory sequence:
+
+```text
+S0 Opt/Freq -> R0 vertical TD-DFT/NTO -> human STATE_SELECTION_APPROVED
+-> S1 Opt (FOLLOWIROOT true) -> human STATE_IDENTITY_MATCH
+-> optional S1 Freq -> emission / ESD / report
+```
+
+- Do not default scientifically to `IROOT=1`. The selected root is per species and is hash-bound to its completed R0 vertical input/output by `state_gate.py select`.
+- Auto-generated S1 optimization and S1 frequency inputs always write `FOLLOWIROOT true`; never omit or disable it unless the user explicitly requests that exception and records a scientific rationale in the input review.
+- S1 optimization is separate from S1 frequency. Set `S1_FREQUENCY=true` only when an S1 Hessian is needed for minimum validation, E00/ZPE, vibronic analysis, or AH ESD.
+- Before emission, ESD, or reporting, require `state_gate.py confirm` for the optimized-state input/output. Root following is not itself proof of state identity.
+- Generated inputs must carry `# @...` machine-readable provenance lines. The review tool reads these before heuristic parsing; use quoted `xyzfile` coordinates so geometry source and hash are explicit.
+- Write `CPCMEQ` explicitly in all AutoORCA TD-DFT inputs. Record the chosen absorption, optimization, frequency, and emission solvent regimes.
+- Never execute AutoORCA-generated input by direct `orca`, `$MYORCA`, or `mpirun orca` invocation. Standard phases and ad-hoc inputs must use the review-aware runner: `scripts/run_reviewed_input.sh input.inp`.

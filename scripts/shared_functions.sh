@@ -16,9 +16,11 @@ WORKDIR="${AUTOORCA_WORKDIR:-$PWD}"
 WORKDIR="$(realpath "$WORKDIR")"
 STATUS_FILE="${STATUS_FILE:-$WORKDIR/cascade_status.json}"
 INPUT_REVIEW_FILE="${INPUT_REVIEW_FILE:-$WORKDIR/input_reviews.json}"
+STATE_GATE_FILE="${STATE_GATE_FILE:-$WORKDIR/state_gates.json}"
 export INPUT_REVIEW_FILE
 SHARED_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_REVIEW_TOOL="${INPUT_REVIEW_TOOL:-$SHARED_SCRIPT_DIR/input_review.py}"
+STATE_GATE_TOOL="${STATE_GATE_TOOL:-$SHARED_SCRIPT_DIR/state_gate.py}"
 cd "$WORKDIR" || exit 1
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
@@ -63,6 +65,48 @@ mark_input_lifecycle() {
         log "[REVIEW-GATE] unable to record lifecycle state $lifecycle for $input"
         return "$rc"
     fi
+}
+
+require_state_selection() {
+    local species=$1 vertical_input=$2 vertical_output=$3
+    python3 "$STATE_GATE_TOOL" require-selection --manifest "$STATE_GATE_FILE" --species "$species" --vertical-input "$vertical_input" --vertical-output "$vertical_output"
+}
+
+require_state_identity() {
+    local species=$1 opt_input=$2 opt_output=$3
+    python3 "$STATE_GATE_TOOL" require-identity --manifest "$STATE_GATE_FILE" --species "$species" --opt-input "$opt_input" --opt-output "$opt_output"
+}
+
+selected_state_root() {
+    local species=$1
+    python3 - "$STATE_GATE_FILE" "$species" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f: data=json.load(f)
+print(data["species"][sys.argv[2]]["selection"]["selected_root"])
+PYEOF
+}
+
+confirmed_state_root() {
+    local species=$1
+    python3 - "$STATE_GATE_FILE" "$species" <<'PYEOF'
+import json, sys
+with open(sys.argv[1]) as f: data=json.load(f)
+print(data["species"][sys.argv[2]]["identity"]["final_root"])
+PYEOF
+}
+
+write_autoorca_metadata() {
+    local calc=$1 family=$2 functional=$3 basis=$4 dispersion=$5 solvent=$6 regime=$7 geometry=$8 target=${9:-}
+    echo "# @AUTOORCA: 3.3.0"
+    echo "# @CALCULATION_TYPE: ${calc}"
+    echo "# @METHOD_FAMILY: ${family}"
+    echo "# @FUNCTIONAL: ${functional}"
+    echo "# @BASIS: ${basis}"
+    echo "# @DISPERSION: ${dispersion}"
+    echo "# @SOLVENT: ${solvent}"
+    echo "# @SOLVENT_REGIME: ${regime}"
+    echo "# @GEOMETRY_SOURCE: ${geometry}"
+    [ -z "$target" ] || echo "# @TARGET_STATE: ${target}"
 }
 
 slugify() {
@@ -163,9 +207,9 @@ path, allow = sys.argv[1], sys.argv[2].lower() == "true"
 with open(path) as f:
     d = json.load(f)
 a = d.get("methods", {}).get("s0_optfreq")
-b = d.get("methods", {}).get("s1_optfreq")
+b = d.get("methods", {}).get("s1_freq")
 if not a or not b:
-    print("[METHOD-GATE] Missing s0_optfreq or s1_optfreq provenance.")
+    print("[METHOD-GATE] Missing s0_optfreq or s1_freq provenance. Enable S1_FREQUENCY=true for AH ESD(IC).")
     sys.exit(1)
 fields = ["functional", "basis", "dispersion", "solvent", "charge", "multiplicity"]
 diff = [(k, a.get(k), b.get(k)) for k in fields if a.get(k) != b.get(k)]

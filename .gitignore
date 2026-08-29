@@ -33,6 +33,7 @@
 *.vdw*
 *.grid*
 input_reviews.json
+state_gates.json
 
 # ORCA manual (large, copyrighted)
 manual/
