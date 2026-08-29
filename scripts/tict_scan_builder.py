@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from input_review import ReviewError, _render, review
+from experience_gate import ExperienceError, check as experience_check
 
 
 class TictInputError(ValueError):
@@ -118,9 +119,11 @@ def main(config_path: str, output_path: str, manifest_path: str | None = None) -
     path.write_text(output)
     try:
         manifest = Path(manifest_path or os.environ.get("INPUT_REVIEW_FILE", path.parent / "input_reviews.json"))
+        experience_manifest = Path(os.environ.get("EXPERIENCE_GATE_FILE", path.parent / "experience_checks.json"))
+        experience_check(path, experience_manifest, "tict_scan")
         record = review(path, manifest, "tict_scan")
-    except ReviewError as exc:
-        print(f"[TICT] ERROR: unable to register pre-run review: {exc}", file=sys.stderr)
+    except (ReviewError, ExperienceError) as exc:
+        print(f"[TICT] ERROR: unable to register pre-run checks: {exc}", file=sys.stderr)
         raise SystemExit(2)
     print(_render(record))
     print(f"Wrote {output_path} — REVIEW_REQUIRED; no ORCA job was started.")

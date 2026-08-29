@@ -17,10 +17,13 @@ WORKDIR="$(realpath "$WORKDIR")"
 STATUS_FILE="${STATUS_FILE:-$WORKDIR/cascade_status.json}"
 INPUT_REVIEW_FILE="${INPUT_REVIEW_FILE:-$WORKDIR/input_reviews.json}"
 STATE_GATE_FILE="${STATE_GATE_FILE:-$WORKDIR/state_gates.json}"
-export INPUT_REVIEW_FILE
+EXPERIENCE_GATE_FILE="${EXPERIENCE_GATE_FILE:-$WORKDIR/experience_checks.json}"
+EXPERIENCE_CASE_DIR="${EXPERIENCE_CASE_DIR:-$WORKDIR/experience/cases/failure}"
+export INPUT_REVIEW_FILE EXPERIENCE_GATE_FILE
 SHARED_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_REVIEW_TOOL="${INPUT_REVIEW_TOOL:-$SHARED_SCRIPT_DIR/input_review.py}"
 STATE_GATE_TOOL="${STATE_GATE_TOOL:-$SHARED_SCRIPT_DIR/state_gate.py}"
+EXPERIENCE_GATE_TOOL="${EXPERIENCE_GATE_TOOL:-$SHARED_SCRIPT_DIR/experience_gate.py}"
 cd "$WORKDIR" || exit 1
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
@@ -30,8 +33,14 @@ log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
 #------------------------------------------------------------------------------
 register_input_for_review() {
     local input=$1 calculation_type=${2:-"unspecified"}
+    AUTOORCA_TEMPLATE_ARCHIVE="$TEMPLATE_DIR" AUTOORCA_EXPERIENCE_CASE_DIR="$EXPERIENCE_CASE_DIR" python3 "$EXPERIENCE_GATE_TOOL" check "$input" --manifest "$EXPERIENCE_GATE_FILE" --calculation-type "$calculation_type" || return $?
     AUTOORCA_ALLOW_MIXED_HESSIANS="${ALLOW_MIXED_HESSIANS:-false}" \
         python3 "$INPUT_REVIEW_TOOL" review "$input" --manifest "$INPUT_REVIEW_FILE" --calculation-type "$calculation_type"
+}
+
+require_experience_check() {
+    local input=$1
+    AUTOORCA_TEMPLATE_ARCHIVE="$TEMPLATE_DIR" AUTOORCA_EXPERIENCE_CASE_DIR="$EXPERIENCE_CASE_DIR" python3 "$EXPERIENCE_GATE_TOOL" require "$input" --manifest "$EXPERIENCE_GATE_FILE"
 }
 
 require_input_approval() {
@@ -310,6 +319,7 @@ run_orca() {
 
     # This is deliberately before wait_for_job()/orca_done(): AutoORCA must
     # not trust or post-process a historical completed output without review.
+    require_experience_check "$input" || return $?
     require_input_approval "$input" "$outfile" || return $?
 
     if [ ! -x "$MYORCA" ]; then
@@ -478,6 +488,9 @@ diagnose_error() {
     } > "$diag"
     [ -n "$matched_pattern" ] && log "Matched pattern: $matched_pattern"
     log "Diagnosis saved to $diag"
+    if [ -f "${basename}.inp" ]; then
+        python3 "$EXPERIENCE_GATE_TOOL" record-failure "${basename}.inp" --output "$outfile" --pattern "$matched_pattern" --case-dir "$EXPERIENCE_CASE_DIR" || log "WARNING: failed to persist local experience record"
+    fi
 }
 
 EMAIL_TO="${EMAIL_TO:-}"

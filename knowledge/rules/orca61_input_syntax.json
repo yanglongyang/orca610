@@ -1,0 +1,23 @@
+{
+  "id": "ORCA61-TDDFT-001",
+  "status": "CONFIRMED",
+  "evidence_level": "VERIFIED_FAILURE",
+  "scope": {
+    "orca_version": "6.1.x",
+    "module": "TD-DFT",
+    "location": "simple_keyword_line"
+  },
+  "forbidden_patterns": [
+    {
+      "regex": "^\\s*!.*\\bTD-?DFT\\b",
+      "message": "TDDFT/TD-DFT is not a valid simple-input keyword in this ORCA 6.1 workflow. Put TD-DFT settings in a %tddft block instead."
+    }
+  ],
+  "correct_pattern": {
+    "simple_input": "! Opt CAM-B3LYP RIJCOSX def2-SVP ...",
+    "block": "%tddft ... end"
+  },
+  "evidence": [
+    "templates/deprecated/s1_tddft_opt_b3lyp_631gd_local_failure.inp"
+  ]
+}

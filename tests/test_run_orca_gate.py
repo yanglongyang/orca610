@@ -12,6 +12,7 @@ class RunOrcaGateTests(unittest.TestCase):
         end = text.index("#------------------------------------------------------------------------------\n# Data extraction", start)
         body = text[start:end]
         approval = body.index('require_input_approval "$input" "$outfile"')
+        self.assertLess(body.index('require_experience_check "$input"'), approval)
         self.assertLess(approval, body.index('wait_for_job "$basename"'))
         self.assertLess(approval, body.index('if orca_done "$outfile"'))
 

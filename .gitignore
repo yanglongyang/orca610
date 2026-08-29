@@ -34,6 +34,8 @@
 *.grid*
 input_reviews.json
 state_gates.json
+experience_checks.json
+experience/
 
 # ORCA manual (large, copyrighted)
 manual/

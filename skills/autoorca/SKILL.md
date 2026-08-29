@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.3.0
+version: 3.4.0
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -20,6 +20,7 @@ This skill automates **process without relaxing physical consistency**. A calcul
 8. **Do not choose a method because it gives the expected answer.** Agreement with a desired color, wavelength, or literature value is evidence to evaluate, not a criterion for method selection.
 9. **Respect computational resources.** Parallelism, `%MaxCore`, scratch, and queueing must reflect the actual machine.
 10. **Never let an ordinal root choose the science.** A human selects the R0 state from energy/oscillator-strength/NTO evidence and confirms its identity after S1 optimization.
+11. **Use experience before generation.** Archived successes, known failures, and local observations must constrain new input construction before human review.
 
 ---
 
@@ -537,3 +538,22 @@ S0 Opt/Freq -> R0 vertical TD-DFT/NTO -> human STATE_SELECTION_APPROVED
 - Generated inputs must carry `# @...` machine-readable provenance lines. The review tool reads these before heuristic parsing; use quoted `xyzfile` coordinates so geometry source and hash are explicit.
 - Write `CPCMEQ` explicitly in all AutoORCA TD-DFT inputs. Record the chosen absorption, optimization, frequency, and emission solvent regimes.
 - Never execute AutoORCA-generated input by direct `orca`, `$MYORCA`, or `mpirun orca` invocation. Standard phases and ad-hoc inputs must use the review-aware runner: `scripts/run_reviewed_input.sh input.inp`.
+
+---
+
+# 20. Experience-consistency gate (v3.4)
+
+Read `references/experience_memory.md` before constructing any ORCA input. The mandatory order is:
+
+```text
+identify calculation type -> experience lookup -> manual/method check
+-> generate input -> experience preflight PASS -> human input review -> run
+```
+
+1. Search structured rules in `knowledge/rules/`, verified-success templates, deprecated failures, and relevant project-local observations.
+2. Classify evidence as `MANUAL_CONFIRMED`, `VERIFIED_SUCCESS`, `VERIFIED_FAILURE`, or `LOCAL_OBSERVATION`; never promote a local crash into a universal method claim automatically.
+3. Run `scripts/experience_gate.py check input.inp --calculation-type TYPE` before registering input review. A matching confirmed forbidden pattern is a hard refusal, not a review warning.
+4. Use successful templates as syntax/protocol references only. Every molecule-specific instance still needs state selection (when relevant), experience check, and hash-bound human approval.
+5. Preserve runtime failures with `record-failure`; review and curate them before creating a reusable rule.
+
+For example, the ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` or `TD-DFT` in the simple `!` line. Use the `%tddft ... end` block instead. Do not repeat a recorded syntax failure merely because an archive was not consulted.

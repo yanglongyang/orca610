@@ -1,8 +1,8 @@
-# AutoORCA 3.3.0 — State-Selected, Review-Gated Photophysics
+# AutoORCA 3.4.0 — Experience-, State-, and Review-Gated Photophysics
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.3.0 adds human state-selection and post-optimization state-identity gates on top of v3.2 hash-bound input approval. The v3.1.1 fluorescence-probe analysis layer remains included.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.0 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. The v3.1.1 fluorescence-probe analysis layer remains included.
 
 ## Repository layout
 
@@ -31,9 +31,10 @@ The 3.0 revision added scientific guardrails missing from the early version. Ver
 │   ├── tict_scan_builder.py         # root-followed S1 dihedral scan input
 │   ├── fluorescence_probe_report.py # evidence-ranked Markdown + JSON report
 │   ├── input_review.py               # review summary + SHA256 dependency manifest
-│   └── input_approve.py              # records explicit human approval only
+│   ├── input_approve.py              # records explicit human approval only
 │   ├── state_gate.py                 # human R0 selection and S1 identity confirmation
-│   └── run_reviewed_input.sh         # reviewed runner for ad-hoc calculations
+│   ├── experience_gate.py            # pre-generation rules/templates/failure lookup
+│   ├── run_reviewed_input.sh         # reviewed runner for ad-hoc calculations
 │   └── autopilot.sh
 └── templates/
     ├── s0_opt_freq_camb3lyp_631gd.inp
@@ -134,6 +135,12 @@ python3 /path/to/orca610/scripts/state_gate.py confirm \
 ```
 
 Use `scripts/run_reviewed_input.sh input.inp` for ad-hoc AutoORCA inputs; never call ORCA or its wrapper directly.
+
+## Experience-consistency gate (v3.4)
+
+Before any generated input reaches human review, AutoORCA queries structured known-failure rules and available template evidence. A known invalid syntax pattern is refused immediately; it cannot become a reviewable input. For example, ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` / `TD-DFT` in the `!` line and requires TD-DFT controls in `%tddft`.
+
+The preflight record is hash-bound to both the input and rule database. Runtime failures are persistently captured in `experience/cases/failure/` as `LOCAL_OBSERVATION`; they never become universal rules without human curation. See `references/experience_memory.md`.
 
 ## Current cascade
 
