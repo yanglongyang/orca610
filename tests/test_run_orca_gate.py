@@ -16,6 +16,13 @@ class RunOrcaGateTests(unittest.TestCase):
         self.assertLess(approval, body.index('wait_for_job "$basename"'))
         self.assertLess(approval, body.index('if orca_done "$outfile"'))
 
+    def test_actual_orca_version_is_parsed_from_output_and_recorded(self):
+        text = (ROOT / "scripts" / "shared_functions.sh").read_text(encoding="utf-8")
+        self.assertIn("get_orca_output_version()", text)
+        self.assertIn("[PROVENANCE-GATE] ORCA VERSION MISMATCH", text)
+        self.assertIn('record_actual_orca_version "$input" "$outfile"', text)
+        self.assertIn('record_actual_orca_version "${basename}.inp" "$outfile"', text)
+
 
 if __name__ == "__main__":
     unittest.main()

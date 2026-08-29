@@ -1,8 +1,8 @@
-# AutoORCA 3.4.3 — Experience-, State-, and Review-Gated Photophysics
+# AutoORCA 3.4.4 — Experience-, State-, and Review-Gated Photophysics
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.3 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. The v3.1.1 fluorescence-probe analysis layer remains included.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.4 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. The v3.1.1 fluorescence-probe analysis layer remains included.
 
 ## Repository layout
 
@@ -136,11 +136,11 @@ python3 /path/to/orca610/scripts/state_gate.py confirm \
 
 Use `scripts/run_reviewed_input.sh input.inp` for ad-hoc AutoORCA inputs; never call ORCA or its wrapper directly.
 
-## Experience-consistency gate (v3.4.3)
+## Experience-consistency gate (v3.4.4)
 
 Before any generated input is written, AutoORCA queries structured known-failure rules, available template evidence, and project-local observations. It repeats the check against the rendered input before human review. A known invalid syntax pattern or an exact repeat of a recorded local failure under the same ORCA version is refused immediately; it cannot become a reviewable input. Similar prior failures are shown as warnings for scientific inspection. For example, ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` / `TD-DFT` in the `!` line and requires TD-DFT controls in `%tddft`.
 
-The preflight record is hash-bound to the input and the complete consulted evidence index (rules, templates, and local cases). If only the evidence index changes, AutoORCA re-evaluates the unchanged input: new hard evidence stops execution; newly surfaced similar local failures require a separate `experience_gate.py acknowledge input.inp --manifest experience_checks.json` acknowledgement; unrelated changes refresh the experience record without invalidating its independent human input approval. An exact local failure means identical input hash, dependency fingerprints, and ORCA version. AutoORCA detects the installed ORCA version during workflow initialization and writes it into generated input provenance. Runtime failures persist the full input, machine-readable provenance, dependency fingerprints, ORCA version, selected environment information, and output tail in `experience/cases/failure/` as `LOCAL_OBSERVATION`; they never become universal rules without human curation. See `references/experience_memory.md`.
+The preflight record is hash-bound to the input and the complete consulted evidence index (rules, templates, and local cases). If only the evidence index changes, AutoORCA re-evaluates the unchanged input: new hard evidence stops execution; newly surfaced similar local failures require a separate human acknowledgement with `experience_gate.py acknowledge input.inp --manifest experience_checks.json --human-acknowledged`; unrelated changes refresh the experience record without invalidating its independent human input approval. The runner compares the declared ORCA version with the actual version parsed from the completed `.out`, records the actual version in status provenance, and reports a mismatch. An exact local failure means identical input hash, dependency fingerprints, and ORCA version. Runtime failures persist the full input, machine-readable provenance, dependency fingerprints, ORCA version, selected environment information, and output tail in `experience/cases/failure/` as `LOCAL_OBSERVATION`; they never become universal rules without human curation. See `references/experience_memory.md`.
 
 ## Current cascade
 

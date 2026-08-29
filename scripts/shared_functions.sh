@@ -34,6 +34,7 @@ STATE_GATE_FILE="${STATE_GATE_FILE:-$WORKDIR/state_gates.json}"
 EXPERIENCE_GATE_FILE="${EXPERIENCE_GATE_FILE:-$WORKDIR/experience_checks.json}"
 EXPERIENCE_CASE_DIR="${EXPERIENCE_CASE_DIR:-$WORKDIR/experience/cases/failure}"
 export INPUT_REVIEW_FILE EXPERIENCE_GATE_FILE
+export AUTOORCA_STATUS_FILE="$STATUS_FILE"
 SHARED_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INPUT_REVIEW_TOOL="${INPUT_REVIEW_TOOL:-$SHARED_SCRIPT_DIR/input_review.py}"
 STATE_GATE_TOOL="${STATE_GATE_TOOL:-$SHARED_SCRIPT_DIR/state_gate.py}"
@@ -126,7 +127,7 @@ PYEOF
 
 write_autoorca_metadata() {
     local calc=$1 family=$2 functional=$3 basis=$4 dispersion=$5 solvent=$6 regime=$7 geometry=$8 target=${9:-}
-    echo "# @AUTOORCA: 3.4.3"
+    echo "# @AUTOORCA: 3.4.4"
     echo "# @ORCA: ${ORCA_VERSION}"
     echo "# @CALCULATION_TYPE: ${calc}"
     echo "# @METHOD_FAMILY: ${family}"
@@ -137,6 +138,42 @@ write_autoorca_metadata() {
     echo "# @SOLVENT_REGIME: ${regime}"
     echo "# @GEOMETRY_SOURCE: ${geometry}"
     [ -z "$target" ] || echo "# @TARGET_STATE: ${target}"
+}
+
+get_orca_output_version() {
+    local outfile=$1 line version
+    [ -f "$outfile" ] || return 1
+    line=$(grep -iE '([Pp]rogram )?[Vv]ersion[[:space:]:=]+[0-9]' "$outfile" | head -1 || true)
+    version=$(printf '%s\n' "$line" | sed -nE 's/.*([Pp]rogram )?[Vv]ersion[[:space:]:=]+([0-9][^[:space:],;)]*).*/\2/p')
+    [ -n "$version" ] && echo "$version"
+}
+
+record_actual_orca_version() {
+    local input=$1 outfile=$2 actual declared
+    actual=$(get_orca_output_version "$outfile" || true)
+    [ -n "$actual" ] || { log "[PROVENANCE-GATE] ORCA version not found in $outfile"; return 0; }
+    declared=$(grep -iE '^\s*#\s*@ORCA:' "$input" | head -1 | sed -E 's/^[^:]*:[[:space:]]*//' || true)
+    declared=${declared:-$ORCA_VERSION}
+    if [ "$declared" != "$actual" ]; then
+        log "[PROVENANCE-GATE] ORCA VERSION MISMATCH: input declares $declared; output reports $actual"
+    fi
+    [ -f "$STATUS_FILE" ] || return 0
+    python3 - "$STATUS_FILE" "$input" "$declared" "$actual" <<'PYEOF' || log "WARNING: failed to record actual ORCA version in status"
+import datetime as dt, json, sys
+from pathlib import Path
+path=Path(sys.argv[1])
+try:
+    data=json.loads(path.read_text())
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(0)
+runtime=data.setdefault("runtime_provenance", {})
+versions=runtime.setdefault("orca_versions", {})
+versions[str(Path(sys.argv[2]).resolve())]={
+    "declared": sys.argv[3], "actual": sys.argv[4],
+    "recorded_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+}
+path.write_text(json.dumps(data, indent=2)+"\n")
+PYEOF
 }
 
 append_nto_root() {
@@ -413,6 +450,7 @@ run_orca() {
 
     wait "$orca_pid" 2>/dev/null || true
     if orca_done "$outfile"; then
+        record_actual_orca_version "$input" "$outfile"
         mark_input_lifecycle "$input" "COMPLETED" || return $?
         log "SUCCESS: $basename completed normally"
         return 0
@@ -522,7 +560,9 @@ diagnose_error() {
     [ -n "$matched_pattern" ] && log "Matched pattern: $matched_pattern"
     log "Diagnosis saved to $diag"
     if [ -f "${basename}.inp" ]; then
-        python3 "$EXPERIENCE_GATE_TOOL" record-failure "${basename}.inp" --output "$outfile" --pattern "$matched_pattern" --case-dir "$EXPERIENCE_CASE_DIR" --orca-version "${ORCA_VERSION:-6.1.x}" || log "WARNING: failed to persist local experience record"
+        record_actual_orca_version "${basename}.inp" "$outfile"
+        actual_orca_version=$(get_orca_output_version "$outfile" || true)
+        python3 "$EXPERIENCE_GATE_TOOL" record-failure "${basename}.inp" --output "$outfile" --pattern "$matched_pattern" --case-dir "$EXPERIENCE_CASE_DIR" --orca-version "${actual_orca_version:-$ORCA_VERSION}" || log "WARNING: failed to persist local experience record"
     fi
 }
 

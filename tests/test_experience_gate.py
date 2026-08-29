@@ -88,18 +88,26 @@ class ExperienceGateTests(unittest.TestCase):
         self.assertTrue(result["similar_observations"])
 
     def test_new_similar_failure_requires_explicit_acknowledgement(self):
-        self.input.write_text("! CAM-B3LYP\n%pal\n nprocs 2\nend\n# current run\n")
+        prefix = "! CAM-B3LYP\n%pal\n nprocs 2\nend\n# " + "x" * 200
+        self.input.write_text(prefix + " current run\n")
         experience_gate.check(self.input, self.manifest, "s0_optfreq")
-        failed_input = self.work / "failed.inp"
-        failed_input.write_text("! CAM-B3LYP\n%pal\n nprocs 2\nend\n# failed run\n")
         output = self.work / "failed.out"; output.write_text("INPUT ERROR\n")
         case_dir = self.work / "experience" / "cases" / "failure"
-        experience_gate.record_failure(SimpleNamespace(input=str(failed_input), output=str(output), pattern="INPUT ERROR", case_dir=str(case_dir), orca_version="6.1.0"))
+        for index in range(6):
+            failed_input = self.work / f"failed_{index}.inp"
+            failed_input.write_text(prefix + f" failed run {index}\n")
+            experience_gate.record_failure(SimpleNamespace(input=str(failed_input), output=str(output), pattern="INPUT ERROR", case_dir=str(case_dir), orca_version="6.1.0"))
         with self.assertRaises(experience_gate.ExperienceError) as caught:
             experience_gate.require(self.input, self.manifest)
         self.assertIn("EXPERIENCE_WARNING_ACK_REQUIRED", str(caught.exception))
         self.assertIn("Similar project-local failures", str(caught.exception))
-        experience_gate.acknowledge(self.input, self.manifest)
+        self.assertIn("6 total", str(caught.exception))
+        with self.assertRaises(experience_gate.ExperienceError):
+            experience_gate.acknowledge(self.input, self.manifest, False)
+        acknowledged = experience_gate.acknowledge(self.input, self.manifest, True)
+        self.assertEqual(acknowledged["acknowledged_by"], "human")
+        self.assertIn("acknowledged_at", acknowledged)
+        self.assertEqual(len(acknowledged["acknowledged_similar_observations"]), 6)
         self.assertEqual(experience_gate.require(self.input, self.manifest)["input_path"], str(self.input.resolve()))
 
     def test_detects_orca_version_when_not_configured(self):

@@ -80,6 +80,20 @@ def detected_orca_version() -> str:
     return match.group(1) if match else "unknown"
 
 
+def recorded_actual_orca_version(input_path: Path) -> str | None:
+    """Use the version parsed from a prior real run of this exact input, if any."""
+    status_file = os.environ.get("AUTOORCA_STATUS_FILE")
+    if not status_file:
+        return None
+    try:
+        data = json.loads(Path(status_file).read_text())
+        record = data.get("runtime_provenance", {}).get("orca_versions", {}).get(str(input_path.resolve()), {})
+    except (OSError, json.JSONDecodeError):
+        return None
+    actual = record.get("actual")
+    return actual if isinstance(actual, str) and actual else None
+
+
 def index_sha256() -> str:
     """Hash every evidence source consulted by the gate, not rules alone."""
     paths = list(rules_dir().rglob("*.json"))
@@ -150,7 +164,7 @@ def observation_matches(text: str, input_hash: str, dependency_fingerprints: lis
 
 
 def similar_ids(result: dict) -> list[str]:
-    return sorted({item["record_sha256"] for item in result.get("similar_observations", [])})
+    return result.get("similar_observation_ids", [])
 
 
 def load_manifest(path: Path) -> dict:
@@ -175,11 +189,11 @@ def evaluate(input_path: Path, calc_type: str | None) -> dict:
     input_hash = sha256(input_path)
     dependency_fingerprints = dependencies(input_path, text)
     input_metadata = metadata(text)
-    orca_version = input_metadata.get("ORCA") or detected_orca_version()
+    orca_version = recorded_actual_orca_version(input_path) or input_metadata.get("ORCA") or detected_orca_version()
     exact, similar = observation_matches(text, input_hash, dependency_fingerprints, orca_version)
     for record in exact:
         failures.append({"rule_id": "EXACT_REPEAT_LOCAL_FAILURE", "evidence_level": "LOCAL_OBSERVATION", "message": f"this exact input previously failed under ORCA {orca_version}", "evidence": [record["record_path"], record.get("matched_pattern") or "unclassified failure"], "correct_pattern": {"action": "inspect and modify the input; do not blindly repeat the recorded failure"}})
-    return {"input_path": str(input_path), "input_sha256": input_hash, "dependency_fingerprints": dependency_fingerprints, "orca_version": orca_version, "calculation_type": actual_type, "rules_sha256": rules_hash, "experience_index_sha256": index_sha256(), "consulted_rules": [rule["id"] for rule in rules], "template_candidates": matching_templates(actual_type), "local_observations": local_observations()[:5], "similar_observations": similar[:5], "failures": failures, "checked_at": now()}
+    return {"input_path": str(input_path), "input_sha256": input_hash, "dependency_fingerprints": dependency_fingerprints, "orca_version": orca_version, "calculation_type": actual_type, "rules_sha256": rules_hash, "experience_index_sha256": index_sha256(), "consulted_rules": [rule["id"] for rule in rules], "template_candidates": matching_templates(actual_type), "local_observations": local_observations()[:5], "similar_observation_ids": sorted({item["record_sha256"] for item in similar}), "similar_observations_total": len(similar), "similar_observations": similar[:5], "failures": failures, "checked_at": now()}
 
 
 def lookup(calc_type: str) -> dict:
@@ -213,11 +227,14 @@ def require(input_path: Path, manifest_path: Path) -> dict:
         # above, refuse any new hard evidence, otherwise refresh only the
         # experience record. Input-review approval remains independently hash-bound.
         acknowledged = set(record.get("acknowledged_similar_observations", []))
-        new_similar = [item for item in result["similar_observations"] if item["record_sha256"] not in acknowledged]
-        if new_similar:
-            result["new_similar_observations"] = new_similar
-            raise ExperienceError(render(result) + f"\n[EXPERIENCE-GATE] EXPERIENCE_WARNING_ACK_REQUIRED: inspect the new similar failure(s), then run: python3 {Path(__file__)} acknowledge {input_path} --manifest {manifest_path}")
+        new_ids = sorted(set(similar_ids(result)) - acknowledged)
+        if new_ids:
+            result["new_similar_observation_ids"] = new_ids
+            result["new_similar_observations"] = [item for item in result["similar_observations"] if item["record_sha256"] in new_ids]
+            raise ExperienceError(render(result) + f"\n[EXPERIENCE-GATE] EXPERIENCE_WARNING_ACK_REQUIRED: inspect the new similar failure(s), obtain explicit human acknowledgement, then run: python3 {Path(__file__)} acknowledge {input_path} --manifest {manifest_path} --human-acknowledged")
         result["acknowledged_similar_observations"] = sorted(acknowledged)
+        for key in ("acknowledged_by", "acknowledged_at"):
+            if record.get(key): result[key] = record[key]
         result["refreshed_at"] = now()
         manifest["inputs"][result["input_path"]] = result
         save_manifest(manifest_path, manifest)
@@ -225,8 +242,10 @@ def require(input_path: Path, manifest_path: Path) -> dict:
     return record
 
 
-def acknowledge(input_path: Path, manifest_path: Path) -> dict:
+def acknowledge(input_path: Path, manifest_path: Path, human_acknowledged: bool) -> dict:
     """Acknowledge newly surfaced similar failures without re-approving input."""
+    if not human_acknowledged:
+        raise ExperienceError("HUMAN_ACKNOWLEDGEMENT_REQUIRED: display the new similar failures and wait for explicit human acknowledgement before invoking this command.")
     manifest = load_manifest(manifest_path)
     existing = manifest["inputs"].get(str(input_path.resolve()))
     result = evaluate(input_path, existing.get("calculation_type") if existing else None)
@@ -235,7 +254,8 @@ def acknowledge(input_path: Path, manifest_path: Path) -> dict:
     if result["failures"]:
         raise ExperienceError(render(result))
     result["acknowledged_similar_observations"] = similar_ids(result)
-    result["similar_observations_acknowledged_at"] = now()
+    result["acknowledged_by"] = "human"
+    result["acknowledged_at"] = now()
     manifest["inputs"][result["input_path"]] = result
     save_manifest(manifest_path, manifest)
     return result
@@ -250,9 +270,11 @@ def render(result: dict) -> str:
     if result["local_observations"]:
         lines += ["Project-local observations (not generalized rules):"] + [f"  - {item['record_path']} [{item.get('matched_pattern') or 'unclassified'}]" for item in result["local_observations"]]
     if result.get("similar_observations"):
-        lines += ["Similar project-local failures (warning; inspect before proceeding):"] + [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["similar_observations"]]
+        lines.append(f"Similar project-local failures (warning; showing {len(result['similar_observations'])} of {result.get('similar_observations_total', len(result['similar_observations']))}):")
+        lines += [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["similar_observations"]]
     if result.get("new_similar_observations"):
-        lines += ["New similar failures requiring acknowledgement:"] + [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["new_similar_observations"]]
+        lines.append(f"New similar failures requiring acknowledgement ({len(result.get('new_similar_observation_ids', []))} total; displaying up to five):")
+        lines += [f"  - {item['record_path']} (similarity {item['similarity']}; {item.get('matched_pattern') or 'unclassified'})" for item in result["new_similar_observations"]]
     if result.get("failures"):
         lines.append("[EXPERIENCE-GATE] KNOWN INVALID PATTERN")
         for failure in result["failures"]:
@@ -282,6 +304,7 @@ def main() -> None:
     parser.add_argument("--pattern")
     parser.add_argument("--case-dir", default="experience/cases/failure")
     parser.add_argument("--orca-version")
+    parser.add_argument("--human-acknowledged", action="store_true", help="assert that the user explicitly acknowledged the displayed warnings")
     args = parser.parse_args()
     try:
         if args.command == "lookup":
@@ -291,7 +314,7 @@ def main() -> None:
             if not args.output: raise ExperienceError("record-failure requires --output")
             print(f"[EXPERIENCE] local failure recorded: {record_failure(args)}")
         elif args.command == "check": print(render(check(Path(args.input), Path(args.manifest), args.calculation_type)))
-        elif args.command == "acknowledge": print(render(acknowledge(Path(args.input), Path(args.manifest))))
+        elif args.command == "acknowledge": print(render(acknowledge(Path(args.input), Path(args.manifest), args.human_acknowledged)))
         else: print("[EXPERIENCE-GATE] VERIFIED: " + require(Path(args.input), Path(args.manifest))["input_path"])
     except ExperienceError as exc:
         print(str(exc), file=sys.stderr); raise SystemExit(EXPERIENCE_EXIT)
