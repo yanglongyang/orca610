@@ -1,8 +1,8 @@
-# AutoORCA 3.5.0 — Auditable ORCA Photophysics and Visualization
+# AutoORCA 3.5.1 — Auditable ORCA Photophysics and Visualization
 
 AutoORCA is a methodology + shell-script framework for running multi-step ORCA 6.1 calculations **without allowing automation to hide method inconsistencies**.
 
-The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.6 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. Version 3.5 adds a separate, source-hash-bound ORCA `.gbw -> orca_plot -> VMD/Tachyon` orbital-visualization layer; it never changes or reruns an ORCA input. The v3.1.1 fluorescence-probe analysis layer remains included.
+The 3.0 revision added scientific guardrails missing from the early version. Version 3.4.6 restores persistent experience memory: prior successes and failures are consulted before input generation, while human state-selection and hash-bound review remain mandatory. Version 3.5.1 adds a separate, source-hash-bound ORCA `.gbw -> orca_plot -> VMD/Tachyon` orbital-visualization layer; it never changes or reruns an ORCA input. The v3.1.1 fluorescence-probe analysis layer remains included.
 
 ## Publication-quality orbital visualization (v3.5)
 

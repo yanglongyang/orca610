@@ -51,6 +51,7 @@ def generate_cube(
     output_cube: Path,
     grid: int,
     orca_plot: str | None = None,
+    timeout_seconds: int = 600,
 ) -> dict:
     """Run ``orca_plot`` and move its generated cube to ``output_cube``."""
     gbw = gbw.resolve()
@@ -61,10 +62,15 @@ def generate_cube(
         raise OrcaPlotError("orca_plot was not found; supply --orca-plot or add it to PATH")
     workdir = gbw.parent
     before = {item.resolve() for item in workdir.glob("*.cube")}
-    result = subprocess.run(
-        [executable, gbw.name, "-i"], cwd=workdir, input=mo_plot_answers(orbital_index, operator, grid),
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
-    )
+    try:
+        result = subprocess.run(
+            [executable, gbw.name, "-i"], cwd=workdir, input=mo_plot_answers(orbital_index, operator, grid),
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False, timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OrcaPlotError(f"orca_plot exceeded {timeout_seconds}s and was terminated") from exc
+    except OSError as exc:
+        raise OrcaPlotError(f"orca_plot could not start: {exc}") from exc
     if result.returncode != 0:
         raise OrcaPlotError(f"orca_plot failed ({result.returncode}):\n{result.stdout[-2000:]}")
     candidates = _candidate_cubes(workdir, gbw.stem, orbital_index, operator)
@@ -74,4 +80,4 @@ def generate_cube(
         raise OrcaPlotError("orca_plot ended without producing the expected MO cube")
     output_cube.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(source[0]), str(output_cube))
-    return {"command": [executable, gbw.name, "-i"], "stdout_tail": result.stdout[-2000:], "cube": str(output_cube)}
+    return {"command": [executable, gbw.name, "-i"], "timeout_seconds": timeout_seconds, "stdout_tail": result.stdout[-2000:], "cube": str(output_cube)}

@@ -24,7 +24,7 @@ class VisualizationManifestTests(unittest.TestCase):
     def tearDown(self): self.temp.cleanup()
 
     def args(self, **override):
-        data = dict(gbw=str(self.work / "job.gbw"), output=str(self.work / "job.out"), xyz=str(self.work / "job.xyz"), input=str(self.work / "job.inp"), orbitals="HOMO,LUMO", spin=None, all_spins=False, views="front,side", front_axis="smallest", side_axis="middle", isovalue=0.03, profile="publication", grid=100, directory=str(self.work / "visualization"), renderer="vmd", orca_plot=None, vmd=None, execute=False, comparison_manifest=None, allow_comparison_exception=False)
+        data = dict(gbw=str(self.work / "job.gbw"), output=str(self.work / "job.out"), xyz=str(self.work / "job.xyz"), input=str(self.work / "job.inp"), orbitals="HOMO,LUMO", spin=None, all_spins=False, views="front,side", front_axis="smallest", side_axis="middle", isovalue=0.03, profile="publication", grid=100, directory=str(self.work / "visualization"), renderer="vmd", orca_plot=None, vmd=None, orca_plot_timeout=600, vmd_timeout=600, execute=False, comparison_manifest=None, allow_comparison_exception=False, comparison_exception_reason=None)
         data.update(override); return SimpleNamespace(**data)
 
     def test_plan_manifest_is_hashed_and_does_not_claim_rendering(self):
@@ -37,13 +37,38 @@ class VisualizationManifestTests(unittest.TestCase):
         self.assertTrue(data["source"]["gbw"]["sha256"])
         self.assertTrue(all(item["status"] == "PLANNED" for item in data["render"]["results"]))
         self.assertTrue((manifest_path.parent / "render_HOMO_front.tcl").is_file())
+        self.assertEqual(data["source_binding"]["out_gbw"], "VERIFIED")
+        self.assertEqual(data["render"]["view_axis_selectors"], {"front": "smallest", "side": "middle"})
+        self.assertIn("{{{", (manifest_path.parent / "render_HOMO_front.tcl").read_text())
 
     def test_comparison_mismatch_is_a_gate(self):
         baseline = vis.execute(self.args())
         with self.assertRaisesRegex(vis.VisualizationError, "COMPARISON_CONVENTION_MISMATCH"):
             vis.build_plan(self.args(isovalue=0.04, comparison_manifest=str(baseline)))
-        plan = vis.build_plan(self.args(isovalue=0.04, comparison_manifest=str(baseline), allow_comparison_exception=True))
+        with self.assertRaisesRegex(vis.VisualizationError, "COMPARISON_EXCEPTION_REASON_REQUIRED"):
+            vis.build_plan(self.args(isovalue=0.04, comparison_manifest=str(baseline), allow_comparison_exception=True))
+        plan = vis.build_plan(self.args(isovalue=0.04, comparison_manifest=str(baseline), allow_comparison_exception=True, comparison_exception_reason="intentional exploratory figure"))
         self.assertTrue(plan["comparison"]["exception_approved"])
+
+    def test_source_stem_mismatch_is_a_hard_gate(self):
+        other = self.work / "different.gbw"; other.write_bytes(b"other")
+        with self.assertRaisesRegex(vis.VisualizationError, "SOURCE_IDENTITY_MISMATCH"):
+            vis.build_plan(self.args(gbw=str(other)))
+
+    def test_orca_plot_backend_is_hard_gated_to_orca_61(self):
+        output = self.work / "job.out"
+        output.write_text(OUT.replace("6.1.0", "6.0.0"))
+        with self.assertRaisesRegex(vis.VisualizationError, "ORCA61_REQUIRED"):
+            vis.build_plan(self.args())
+
+    def test_cube_xyz_binding_checks_coordinates(self):
+        cube = self.work / "job.mo1a.cube"
+        cube.write_text("cube\ncube\n 3 0 0 0\n 2 1 0 0\n 2 0 1 0\n 2 0 0 1\n 6 0 0 0 0\n 6 0 1.889726 0 0\n 6 0 0 1.889726 0\n")
+        binding = vis.verify_cube_xyz(cube, self.work / "job.xyz")
+        self.assertEqual(binding["status"], "VERIFIED")
+        cube.write_text(cube.read_text().replace("1.889726 0 0", "10 0 0"))
+        with self.assertRaisesRegex(vis.VisualizationError, "CUBE_XYZ_MISMATCH"):
+            vis.verify_cube_xyz(cube, self.work / "job.xyz")
 
 
 if __name__ == "__main__":

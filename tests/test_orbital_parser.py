@@ -15,7 +15,9 @@ ORBITAL ENERGIES
    0  2.0000   -0.5000000      -13.6057
    1  2.0000   -0.3000000       -8.1634
    2  2.0000   -0.1000000       -2.7211
+Occupied Orbitals Manifold
    3  0.0000    0.0500000        1.3606
+Unoccupied Orbitals Manifold
    4  0.0000    0.1000000        2.7211
 ORCA TERMINATED NORMALLY
 """

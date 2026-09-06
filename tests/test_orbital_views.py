@@ -24,6 +24,15 @@ class OrbitalViewTests(unittest.TestCase):
         self.assertEqual(vis.axis_from_name("x", pca), (1.0, 0.0, 0.0))
         self.assertEqual(vis.axis_from_name("middle", pca), (0, 1, 0))
 
+    def test_parallel_reference_axis_uses_a_non_parallel_fallback(self):
+        matrix = vis.camera_matrix((1.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+        self.assertEqual(len(matrix), 16)
+        self.assertAlmostEqual(math.sqrt(sum(item*item for item in matrix[0:3])), 1.0, places=7)
+
+    def test_matrix_tcl_is_nested_four_by_four(self):
+        encoded = vis.matrix_tcl([1.0, 0.0, 0.0, 0.0] * 4)
+        self.assertEqual(encoded, "{{{1 0 0 0} {1 0 0 0} {1 0 0 0} {1 0 0 0}}}")
+
 
 if __name__ == "__main__":
     unittest.main()

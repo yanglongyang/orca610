@@ -10,7 +10,8 @@ TGA which is converted to lossless PNG only when ImageMagick is available.
 The manifest records an absent renderer/converter as absent—it never claims a
 PNG was made when it was not.
 
-For comparisons, keep the isovalue, rendering profile, and camera convention
-constant. `--comparison-manifest` enforces that convention against an existing
-AutoORCA visualization manifest unless the user explicitly records an
-`--allow-comparison-exception`.
+For comparisons, keep the isovalue, rendering profile, camera convention, and
+front/side axis selectors constant. `--comparison-manifest` enforces that
+convention against an existing AutoORCA visualization manifest. An exception
+requires both `--allow-comparison-exception` and a human-supplied
+`--comparison-exception-reason`, which is retained in the manifest.
