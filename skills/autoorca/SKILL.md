@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.4.6
+version: 3.5.0
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -578,3 +578,37 @@ When a reproducible defect is in AutoORCA's own runner, manifest handling, parse
 Before every launch, compare the input `# @ORCA:` value with the currently resolved ORCA binary version. If unavailable or mismatched, stop with `ORCA_VERSION_REVIEW_REQUIRED`; regenerate the input provenance and obtain a new human input approval. A completed output records its parsed actual version, resolved binary path, and input SHA256 in runtime provenance. Never reuse a prior actual version merely because the input path matches: its SHA256 must also match.
 
 For example, the ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` or `TD-DFT` in the simple `!` line. Use the `%tddft ... end` block instead. Do not repeat a recorded syntax failure merely because an archive was not consulted.
+
+---
+
+# 21. Publication-quality orbital visualization (v3.5)
+
+Use this as a separate **post-processing visualization layer**, after a normally completed ORCA calculation. Read `references/orbital_visualization.md` for ORCA cube generation and `references/vmd_publication_rendering.md` when rendering images.
+
+```text
+completed .out + .gbw + .xyz
+-> orbital_visualize.py
+-> ORCA orca_plot MO cube
+-> PCA-oriented VMD/Tachyon images
+-> hash-bound visualization manifest
+```
+
+The default command plans auditable artifacts only. Add `--execute` only after confirming the completed source files and the selected orbital/spin request:
+
+```bash
+python3 scripts/orbital_visualize.py \
+  --gbw phaseXX/job.gbw --output phaseXX/job.out --xyz phaseXX/job.xyz \
+  --orbitals HOMO,LUMO --profile publication --execute
+```
+
+Rules:
+
+1. This layer must never alter an ORCA input or launch/relaunch an electronic-structure calculation. `orca_plot` is a completed-calculation utility, not a new SCF/TD-DFT run.
+2. Use ORCA-native `.gbw -> orca_plot -> Gaussian Cube` first. Multiwfn is an optional future fallback for analyses that ORCA MO plotting does not cover; do not make it a required dependency.
+3. ORCA MO indices start at zero. For RHF/RKS use operator `0`; for UHF/UKS alpha/beta use `0`/`1`. For an open-shell output, a bare HOMO/LUMO request must stop until the user supplies `--spin alpha`, `--spin beta`, or `--all-spins`.
+4. The publication default is fixed `isovalue=0.03`, orthographic camera, white background, AO/shadows, and 3000 x 2400 lossless PNG. `preview` is 1200 x 900. Do not silently tune one orbital's isovalue to make it look better.
+5. For images intended for comparison (HOMO/LUMO, probe/product, or a series), use a fixed isovalue, rendering profile, and camera convention. Pass an earlier `--comparison-manifest`; a mismatch is a hard stop unless the human explicitly authorizes and records `--allow-comparison-exception`.
+6. The manifest must retain source paths/SHA256s, ORCA version/method metadata where available, selected index/spin/energy, cube grid, isovalue, renderer/profile, PCA or override axes, and camera matrices. Never claim an image was rendered when VMD or PNG conversion was unavailable.
+7. A HOMO/LUMO image alone does not establish ICT, charge transfer, or a fluorescence mechanism. Maintain the existing NTO/state-identity evidence gate. An overall MO positive/negative phase inversion has no physical significance.
+
+The architecture is intentionally named orbital visualization rather than HOMO/LUMO rendering: v3.5 supports MO frontier orbitals; future NTO-hole/NTO-electron, UNO, localized-orbital, ESP, ELF, and LOL backends must retain the same provenance and rendering rules.

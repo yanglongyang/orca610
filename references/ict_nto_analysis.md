@@ -6,4 +6,4 @@ ORCA 6.1 supports `DoNTO`, `NTOStates`, and `NTOThresh` in `%tddft`; AutoORCA en
 
 Classify a state as `LOCAL`, `PARTIAL_CT`, `STRONG_CT`, `MIXED`, or `UNRESOLVED` only after state identity and donor/acceptor NTO descriptions are recorded. Qualitative NTO evidence and quantitative hole-electron evidence must be reported separately. Do not fabricate a CT distance from an orbital image.
 
-Keep visual products under a project-local convention such as `analysis/nto/<species>_R0/` and `analysis/nto/<species>_R1/`. Generate cube files with locally verified `orca_plot` commands when practical; this repository intentionally does not guess an interactive plotting sequence.
+Keep visual products under a project-local convention such as `analysis/nto/<species>_R0/` and `analysis/nto/<species>_R1/`. For reproducible MO cubes and publication rendering, use the versioned ORCA 6.1 backend in `scripts/orbital_visualize.py` and preserve its manifest. NTO generation/selection remains a separate state-analysis step; do not label a generic MO image as an NTO or let a picture replace NTO evidence.

@@ -12,7 +12,10 @@ SHARED = ROOT / "scripts" / "shared_functions.sh"
 
 class RunnerLockingTests(unittest.TestCase):
     def bash(self) -> str | None:
-        return shutil.which("bash") or (r"C:\Program Files\Git\bin\bash.exe" if Path(r"C:\Program Files\Git\bin\bash.exe").exists() else None)
+        # On Windows, prefer Git Bash. ``C:\Windows\System32\bash.exe`` is a
+        # WSL launcher and cannot safely receive native temporary-file paths.
+        git_bash = Path(r"C:\Program Files\Git\bin\bash.exe")
+        return str(git_bash) if git_bash.exists() else shutil.which("bash")
 
     def test_pid_lock_is_input_scoped_and_never_greps_global_processes(self):
         text = SHARED.read_text(encoding="utf-8")
