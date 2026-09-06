@@ -60,6 +60,10 @@ tddft4s/
 # IDE
 .vscode/
 
+# Python test/runtime cache
+__pycache__/
+*.py[cod]
+
 # Local project directories (keep your calculations out of the repo)
 34qy/
 LSH-*/
