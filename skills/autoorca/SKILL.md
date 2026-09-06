@@ -1,7 +1,7 @@
 ---
 name: autoorca
 description: Build, run, validate, and debug ORCA 6.1 computational-chemistry workflows with explicit method provenance, energy-consistency gates, excited-state identity tracking, manual-driven syntax verification, and resource-aware automation. Use for multi-step ORCA calculations, photophysics workflows, TD-DFT/STEOM diagnostics, ESD rate calculations, reusable templates, and long-running job orchestration.
-version: 3.5.2
+version: 3.5.3
 ---
 
 # AutoORCA — Scientifically Guarded ORCA Workflows
@@ -581,7 +581,7 @@ For example, the ORCA 6.1 rule `ORCA61-TDDFT-001` rejects `TDDFT` or `TD-DFT` in
 
 ---
 
-# 21. Publication-quality orbital visualization (v3.5.2)
+# 21. Publication-quality orbital visualization (v3.5.3)
 
 Use this as a separate **post-processing visualization layer**, after a normally completed ORCA calculation. Read `references/orbital_visualization.md` for ORCA cube generation and `references/vmd_publication_rendering.md` when rendering images.
 
@@ -608,9 +608,11 @@ Rules:
 3. ORCA MO indices start at zero. For RHF/RKS use operator `0`; for UHF/UKS alpha/beta use `0`/`1`. For an open-shell output, a bare HOMO/LUMO request must stop until the user supplies `--spin alpha`, `--spin beta`, or `--all-spins`.
 4. The publication default is fixed `isovalue=0.03`, orthographic camera, white background, AO/shadows, and 3000 x 2400 lossless PNG. `preview` is 1200 x 900. Do not silently tune one orbital's isovalue to make it look better.
 5. The `.out`, `.gbw`, and optional `--input` must share the same resolved directory and basename; the output must identify ORCA 6.1.x before the automated `orca_plot` menu is enabled. After cube generation, verify its atom count and coordinates against the supplied XYZ before invoking VMD. A mismatch is a hard stop for rendering.
-6. Accept only a cube newly created or content-modified by this exact `orca_plot` invocation—never fall back to a pre-existing unchanged cube. Likewise, VMD/Tachyon and conversion outputs must be new/modified in this invocation. Stale artifacts are partial/failed results, not successful rendering.
-7. For images intended for comparison (HOMO/LUMO, probe/product, or a series), use a fixed isovalue, rendering profile, camera convention, and `front`/`side` axis selectors. Pass an earlier `--comparison-manifest`; a mismatch is a hard stop unless the human explicitly authorizes it **and** supplies `--comparison-exception-reason` for the manifest.
-8. The manifest must retain source paths/SHA256s, ORCA version/method metadata where available, selected index/spin/energy, cube grid, isovalue, renderer/profile, PCA or override axes, camera matrices, external-tool versions, timeouts, and generated cube/image hashes. Record an `overall_status`: `PLANNED`, `COMPLETED`, `PARTIAL`, or `FAILED`; a failed or partial requested render must return nonzero.
-9. A HOMO/LUMO image alone does not establish ICT, charge transfer, or a fluorescence mechanism. Maintain the existing NTO/state-identity evidence gate. An overall MO positive/negative phase inversion has no physical significance.
+6. Require at least one requested orbital and one requested view. Reject empty `--orbitals` or `--views`; zero generated artifacts are never `COMPLETED`.
+7. Accept only a cube newly created or content-modified by this exact `orca_plot` invocation—never fall back to a pre-existing unchanged cube. Before VMD/Tachyon, remove only the pipeline-owned target TGA/PNG artifacts, then require newly created files; deterministic re-renders may be byte-identical and are valid. Stale source artifacts are partial/failed results, not successful rendering.
+8. Cube↔XYZ verification must match ordered atom count, atomic identity, and coordinates—not coordinates alone.
+9. For images intended for comparison (HOMO/LUMO, probe/product, or a series), use a fixed isovalue, rendering profile, camera convention, and `front`/`side` axis selectors. Pass an earlier `--comparison-manifest`; a mismatch is a hard stop unless the human explicitly authorizes it **and** supplies `--comparison-exception-reason` for the manifest.
+10. The manifest must retain source paths/SHA256s, ORCA version/method metadata where available, selected index/spin/energy, cube grid, isovalue, renderer/profile, PCA or override axes, camera matrices, external-tool versions, timeouts, and generated cube/image hashes. Record an `overall_status`: `PLANNED`, `COMPLETED`, `PARTIAL`, or `FAILED`; a failed or partial requested render must return nonzero.
+11. A HOMO/LUMO image alone does not establish ICT, charge transfer, or a fluorescence mechanism. Maintain the existing NTO/state-identity evidence gate. An overall MO positive/negative phase inversion has no physical significance.
 
 The architecture is intentionally named orbital visualization rather than HOMO/LUMO rendering: v3.5 supports MO frontier orbitals; future NTO-hole/NTO-electron, UNO, localized-orbital, ESP, ELF, and LOL backends must retain the same provenance and rendering rules.

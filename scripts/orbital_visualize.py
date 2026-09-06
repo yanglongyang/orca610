@@ -26,6 +26,15 @@ EPS = 1.0e-7
 BOHR_TO_ANGSTROM = 0.529177210903
 ORCA_PLOT_BACKEND_VERSION = "6.1"
 PROFILE_RESOLUTIONS = {"preview": (1200, 900), "publication": (3000, 2400)}
+ELEMENT_SYMBOLS = (
+    "", "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca",
+    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr", "Rb", "Sr", "Y", "Zr",
+    "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "I", "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd",
+    "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+    "Tl", "Pb", "Bi", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm",
+    "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", "Nh", "Fl", "Mc", "Lv", "Ts", "Og",
+)
+ATOMIC_NUMBERS = {symbol.upper(): number for number, symbol in enumerate(ELEMENT_SYMBOLS) if symbol}
 
 
 class VisualizationError(ValueError):
@@ -267,6 +276,8 @@ def require_source_identity(out: Path, gbw: Path, orca_version: str | None) -> d
 def require_input_identity(input_path: Path | None, out: Path) -> dict:
     if input_path is None:
         return {"input": "NOT_SUPPLIED"}
+    if not input_path.is_file():
+        raise VisualizationError(f"INPUT_SOURCE_NOT_FOUND: {input_path}")
     if input_path.stem != out.stem or input_path.parent != out.parent:
         raise VisualizationError("SOURCE_IDENTITY_MISMATCH: --input must share the output directory and basename")
     return {"input": "VERIFIED", "input_identity_rule": "matching output basename and directory"}
@@ -303,7 +314,12 @@ def verify_cube_xyz(cube: Path, xyz: Path, tolerance_angstrom: float = 0.01) -> 
     if len(cube_atoms) != len(xyz_atoms):
         raise VisualizationError(f"CUBE_XYZ_MISMATCH: cube has {len(cube_atoms)} atoms; XYZ has {len(xyz_atoms)}")
     max_deviation = 0.0
-    for index, ((_, cube_point), (_, xyz_point)) in enumerate(zip(cube_atoms, xyz_atoms)):
+    for index, ((cube_atomic_number, cube_point), (xyz_symbol, xyz_point)) in enumerate(zip(cube_atoms, xyz_atoms)):
+        xyz_atomic_number = ATOMIC_NUMBERS.get(xyz_symbol.upper())
+        if xyz_atomic_number is None:
+            raise VisualizationError(f"CUBE_XYZ_ELEMENT_UNSUPPORTED: XYZ atom {index} has unsupported element {xyz_symbol!r}")
+        if cube_atomic_number != xyz_atomic_number:
+            raise VisualizationError(f"CUBE_XYZ_ELEMENT_MISMATCH: atom {index} is Z={cube_atomic_number} in cube but {xyz_symbol} (Z={xyz_atomic_number}) in XYZ")
         deviation = math.sqrt(sum((a-b)**2 for a, b in zip(cube_point, xyz_point)))
         max_deviation = max(max_deviation, deviation)
         if deviation > tolerance_angstrom:
@@ -388,34 +404,36 @@ def run_vmd(script: Path, tga: Path, png: Path, vmd: str | None, timeout_seconds
     executable = vmd or shutil.which("vmd")
     if not executable:
         return {"status": "VMD_NOT_AVAILABLE"}
-    before_tga, before_png = artifact_hash(tga), artifact_hash(png)
+    replaced = {"tga_previous_sha256": artifact_hash(tga), "png_previous_sha256": artifact_hash(png)}
+    # These are pipeline-owned derived artifacts, not source calculations.
+    # Removing them before invocation makes a newly created file mandatory,
+    # while still allowing bitwise-identical deterministic re-rendering.
+    for artifact in (tga, png):
+        if artifact.is_file():
+            artifact.unlink()
     version = executable_version(executable, "-version")
     try:
         completed = subprocess.run([executable, "-dispdev", "text", "-e", str(script)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
-        return {"status": "VMD_TIMEOUT", "vmd_version": version, "timeout_seconds": timeout_seconds}
+        return {"status": "VMD_TIMEOUT", "vmd_version": version, "timeout_seconds": timeout_seconds, **replaced}
     except OSError as exc:
-        return {"status": "VMD_START_FAILED", "vmd_version": version, "error": str(exc)}
+        return {"status": "VMD_START_FAILED", "vmd_version": version, "error": str(exc), **replaced}
     if completed.returncode != 0 or not tga.is_file():
-        return {"status": "VMD_FAILED", "vmd_version": version, "stdout_tail": completed.stdout[-2000:]}
-    if artifact_hash(tga) == before_tga:
-        return {"status": "VMD_STALE_ARTIFACT", "vmd_version": version, "tga": str(tga), "tga_sha256": before_tga}
+        return {"status": "VMD_FAILED", "vmd_version": version, "stdout_tail": completed.stdout[-2000:], **replaced}
     converter_info = image_converter()
     if not converter_info:
-        return {"status": "PNG_CONVERTER_NOT_AVAILABLE", "vmd_version": version, "tga": str(tga), "tga_sha256": sha256(tga)}
+        return {"status": "PNG_CONVERTER_NOT_AVAILABLE", "vmd_version": version, "tga": str(tga), "tga_sha256": sha256(tga), **replaced}
     converter, converter_version = converter_info
     try:
         converted = subprocess.run([converter, str(tga), str(png)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
-        return {"status": "PNG_CONVERSION_TIMEOUT", "vmd_version": version, "png_converter_version": converter_version, "tga": str(tga), "tga_sha256": sha256(tga)}
+        return {"status": "PNG_CONVERSION_TIMEOUT", "vmd_version": version, "png_converter_version": converter_version, "tga": str(tga), "tga_sha256": sha256(tga), **replaced}
     except OSError as exc:
-        return {"status": "PNG_CONVERSION_START_FAILED", "vmd_version": version, "png_converter_version": converter_version, "error": str(exc), "tga": str(tga), "tga_sha256": sha256(tga)}
+        return {"status": "PNG_CONVERSION_START_FAILED", "vmd_version": version, "png_converter_version": converter_version, "error": str(exc), "tga": str(tga), "tga_sha256": sha256(tga), **replaced}
     status = "RENDERED" if converted.returncode == 0 and png.is_file() else "PNG_CONVERSION_FAILED"
-    result = {"status": status, "vmd_version": version, "png_converter_version": converter_version, "tga": str(tga), "tga_sha256": sha256(tga), "png": str(png)}
+    result = {"status": status, "vmd_version": version, "png_converter_version": converter_version, "tga": str(tga), "tga_sha256": sha256(tga), "png": str(png), **replaced}
     if status == "RENDERED":
         result["png_sha256"] = sha256(png)
-        if result["png_sha256"] == before_png:
-            result["status"] = "PNG_STALE_ARTIFACT"
     return result
 
 
@@ -430,18 +448,23 @@ def build_plan(args: argparse.Namespace) -> dict:
     orca_version = output_version(output_text)
     source_binding = {**require_source_identity(out, gbw, orca_version), **require_input_identity(input_path, out)}
     channels = parse_orbitals(output_text)
-    requests = resolve_orbitals(channels, [item.strip() for item in args.orbitals.split(",") if item.strip()], args.spin, args.all_spins)
+    selectors = [item.strip() for item in args.orbitals.split(",") if item.strip()]
+    if not selectors:
+        raise VisualizationError("ORBITAL_SELECTION_REQUIRED: at least one orbital must be requested")
+    requests = resolve_orbitals(channels, selectors, args.spin, args.all_spins)
     pca = pca_axes(parse_xyz(xyz))
     views = [item.strip() for item in args.views.split(",") if item.strip()]
+    if not views:
+        raise VisualizationError("VIEW_REQUIRED: request front and/or side")
     if set(views) - {"front", "side"}: raise VisualizationError("views must be front and/or side")
     axes = {"front": axis_from_name(args.front_axis, pca), "side": axis_from_name(args.side_axis, pca)}
     reference = pca["largest"]
     matrices = {view: camera_matrix(axes[view], reference) for view in views}
     resolution = PROFILE_RESOLUTIONS[args.profile]
     manifest_path = Path(args.directory).resolve() / "visualization_manifest.json" if args.directory else out.parent / "visualization" / "visualization_manifest.json"
-    selectors = {"front": args.front_axis, "side": args.side_axis}
-    comparison = comparison_check(Path(args.comparison_manifest).resolve() if args.comparison_manifest else None, args.isovalue, args.profile, views, selectors, args.allow_comparison_exception, args.comparison_exception_reason)
-    return {"manifest_path": manifest_path, "out": out, "gbw": gbw, "xyz": xyz, "input": input_path, "output_text": output_text, "orca_version": orca_version, "source_binding": source_binding, "requests": requests, "pca": pca, "axes": axes, "matrices": matrices, "views": views, "selectors": selectors, "resolution": resolution, "comparison": comparison}
+    view_selectors = {"front": args.front_axis, "side": args.side_axis}
+    comparison = comparison_check(Path(args.comparison_manifest).resolve() if args.comparison_manifest else None, args.isovalue, args.profile, views, view_selectors, args.allow_comparison_exception, args.comparison_exception_reason)
+    return {"manifest_path": manifest_path, "out": out, "gbw": gbw, "xyz": xyz, "input": input_path, "output_text": output_text, "orca_version": orca_version, "source_binding": source_binding, "requests": requests, "pca": pca, "axes": axes, "matrices": matrices, "views": views, "selectors": view_selectors, "resolution": resolution, "comparison": comparison}
 
 
 def execute(args: argparse.Namespace) -> Path:

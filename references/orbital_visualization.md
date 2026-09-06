@@ -27,7 +27,10 @@ The ORCA and VMD calls have bounded timeouts (600 seconds by default, adjustable
 with `--orca-plot-timeout` and `--vmd-timeout`). The VMD camera is written as a
 nested 4 x 4 Tcl matrix. PCA signs are canonicalized and the basis is made
 right-handed so equivalent geometries do not acquire arbitrary mirror/flip
-orientations. A cube is accepted only if the current `orca_plot` invocation
-created or content-modified it; VMD/PNG artifacts follow the same no-stale-file
-rule. `overall_status` is `PLANNED`, `COMPLETED`, `PARTIAL`, or `FAILED` and
-requested partial/failed rendering returns a nonzero process status.
+orientations. An empty orbital or view request is rejected. A cube is accepted
+only if the current `orca_plot` invocation created or content-modified it; its
+ordered atoms must match the XYZ element identities as well as coordinates.
+Pipeline-owned TGA/PNG targets are removed before each VMD invocation, so a
+newly generated deterministic image may legitimately have the same hash as a
+previous image. `overall_status` is `PLANNED`, `COMPLETED`, `PARTIAL`, or
+`FAILED` and requested partial/failed rendering returns a nonzero process status.

@@ -68,6 +68,18 @@ class VisualizationManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(vis.VisualizationError, "SOURCE_IDENTITY_MISMATCH"):
             vis.build_plan(self.args(input=str(other)))
 
+    def test_missing_input_source_is_a_clear_gate(self):
+        with self.assertRaisesRegex(vis.VisualizationError, "INPUT_SOURCE_NOT_FOUND"):
+            vis.build_plan(self.args(input=str(self.work / "job.inp.missing")))
+
+    def test_empty_orbital_request_is_rejected(self):
+        with self.assertRaisesRegex(vis.VisualizationError, "ORBITAL_SELECTION_REQUIRED"):
+            vis.build_plan(self.args(orbitals=""))
+
+    def test_empty_view_request_is_rejected(self):
+        with self.assertRaisesRegex(vis.VisualizationError, "VIEW_REQUIRED"):
+            vis.build_plan(self.args(views=""))
+
     def test_cube_xyz_binding_checks_coordinates(self):
         cube = self.work / "job.mo1a.cube"
         cube.write_text("cube\ncube\n 3 0 0 0\n 2 1 0 0\n 2 0 1 0\n 2 0 0 1\n 6 0 0 0 0\n 6 0 1.889726 0 0\n 6 0 0 1.889726 0\n")
@@ -77,13 +89,32 @@ class VisualizationManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(vis.VisualizationError, "CUBE_XYZ_MISMATCH"):
             vis.verify_cube_xyz(cube, self.work / "job.xyz")
 
-    def test_vmd_cannot_reuse_an_unchanged_old_tga(self):
+        cube.write_text(cube.read_text().replace("10 0 0", "1.889726 0 0").replace(" 6 0 0 0 0", " 8 0 0 0 0"))
+        with self.assertRaisesRegex(vis.VisualizationError, "CUBE_XYZ_ELEMENT_MISMATCH"):
+            vis.verify_cube_xyz(cube, self.work / "job.xyz")
+
+    def test_vmd_replaces_old_derived_artifacts_and_accepts_deterministic_output(self):
         script, tga, png = self.work / "render.tcl", self.work / "old.tga", self.work / "new.png"
-        script.write_text("quit\n"); tga.write_text("old tga")
-        calls = iter([SimpleNamespace(stdout="VMD 1.9", returncode=0), SimpleNamespace(stdout="", returncode=0)])
-        with patch.object(vis.shutil, "which", return_value="vmd"), patch.object(vis.subprocess, "run", side_effect=lambda *args, **kwargs: next(calls)):
+        script.write_text("quit\n"); tga.write_text("same tga"); png.write_text("same png")
+
+        def fake_run(command, **kwargs):
+            if command == ["vmd", "-version"]:
+                return SimpleNamespace(stdout="VMD 1.9", returncode=0)
+            if command[:2] == ["vmd", "-dispdev"]:
+                self.assertFalse(tga.exists()); self.assertFalse(png.exists())
+                tga.write_text("same tga")
+                return SimpleNamespace(stdout="", returncode=0)
+            if command == ["magick", "-version"]:
+                return SimpleNamespace(stdout="ImageMagick 7", returncode=0)
+            self.assertEqual(command[0], "magick")
+            png.write_text("same png")
+            return SimpleNamespace(stdout="", returncode=0)
+
+        with patch.object(vis.shutil, "which", side_effect=lambda name: "magick" if name == "magick" else None), patch.object(vis.subprocess, "run", side_effect=fake_run):
             result = vis.run_vmd(script, tga, png, "vmd", 10)
-        self.assertEqual(result["status"], "VMD_STALE_ARTIFACT")
+        self.assertEqual(result["status"], "RENDERED")
+        self.assertTrue(result["tga_previous_sha256"])
+        self.assertTrue(result["png_previous_sha256"])
 
 
 if __name__ == "__main__":
