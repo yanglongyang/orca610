@@ -264,6 +264,14 @@ def require_source_identity(out: Path, gbw: Path, orca_version: str | None) -> d
     return {"out_gbw": "VERIFIED", "identity_rule": "matching basename plus completed ORCA 6.1.x output", "orca_plot_backend_version": ORCA_PLOT_BACKEND_VERSION}
 
 
+def require_input_identity(input_path: Path | None, out: Path) -> dict:
+    if input_path is None:
+        return {"input": "NOT_SUPPLIED"}
+    if input_path.stem != out.stem or input_path.parent != out.parent:
+        raise VisualizationError("SOURCE_IDENTITY_MISMATCH: --input must share the output directory and basename")
+    return {"input": "VERIFIED", "input_identity_rule": "matching output basename and directory"}
+
+
 def parse_cube_atoms(path: Path) -> list[tuple[int, tuple[float, float, float]]]:
     """Read Gaussian Cube atom coordinates and normalize them to Angstrom."""
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -372,10 +380,15 @@ def image_converter() -> tuple[str, str | None] | None:
     return None
 
 
+def artifact_hash(path: Path) -> str | None:
+    return sha256(path) if path.is_file() else None
+
+
 def run_vmd(script: Path, tga: Path, png: Path, vmd: str | None, timeout_seconds: int) -> dict:
     executable = vmd or shutil.which("vmd")
     if not executable:
         return {"status": "VMD_NOT_AVAILABLE"}
+    before_tga, before_png = artifact_hash(tga), artifact_hash(png)
     version = executable_version(executable, "-version")
     try:
         completed = subprocess.run([executable, "-dispdev", "text", "-e", str(script)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False, timeout=timeout_seconds)
@@ -385,6 +398,8 @@ def run_vmd(script: Path, tga: Path, png: Path, vmd: str | None, timeout_seconds
         return {"status": "VMD_START_FAILED", "vmd_version": version, "error": str(exc)}
     if completed.returncode != 0 or not tga.is_file():
         return {"status": "VMD_FAILED", "vmd_version": version, "stdout_tail": completed.stdout[-2000:]}
+    if artifact_hash(tga) == before_tga:
+        return {"status": "VMD_STALE_ARTIFACT", "vmd_version": version, "tga": str(tga), "tga_sha256": before_tga}
     converter_info = image_converter()
     if not converter_info:
         return {"status": "PNG_CONVERTER_NOT_AVAILABLE", "vmd_version": version, "tga": str(tga), "tga_sha256": sha256(tga)}
@@ -397,7 +412,10 @@ def run_vmd(script: Path, tga: Path, png: Path, vmd: str | None, timeout_seconds
         return {"status": "PNG_CONVERSION_START_FAILED", "vmd_version": version, "png_converter_version": converter_version, "error": str(exc), "tga": str(tga), "tga_sha256": sha256(tga)}
     status = "RENDERED" if converted.returncode == 0 and png.is_file() else "PNG_CONVERSION_FAILED"
     result = {"status": status, "vmd_version": version, "png_converter_version": converter_version, "tga": str(tga), "tga_sha256": sha256(tga), "png": str(png)}
-    if status == "RENDERED": result["png_sha256"] = sha256(png)
+    if status == "RENDERED":
+        result["png_sha256"] = sha256(png)
+        if result["png_sha256"] == before_png:
+            result["status"] = "PNG_STALE_ARTIFACT"
     return result
 
 
@@ -410,7 +428,7 @@ def build_plan(args: argparse.Namespace) -> dict:
     if "ORCA TERMINATED NORMALLY" not in output_text:
         raise VisualizationError("output is not a normally completed ORCA calculation")
     orca_version = output_version(output_text)
-    source_binding = require_source_identity(out, gbw, orca_version)
+    source_binding = {**require_source_identity(out, gbw, orca_version), **require_input_identity(input_path, out)}
     channels = parse_orbitals(output_text)
     requests = resolve_orbitals(channels, [item.strip() for item in args.orbitals.split(",") if item.strip()], args.spin, args.all_spins)
     pca = pca_axes(parse_xyz(xyz))
@@ -458,7 +476,18 @@ def execute(args: argparse.Namespace) -> Path:
     sources = {"output": source_record(plan["out"]), "gbw": source_record(plan["gbw"]), "xyz": source_record(plan["xyz"]), "input": source_record(plan["input"])}
     calculation_hash = hashlib.sha256("".join(value["sha256"] for value in sources.values() if value).encode()).hexdigest()
     source_binding = {**plan["source_binding"], "cube_xyz": {record["label"]: record["cube_xyz_binding"] for record in records}}
-    manifest = {"schema_version": 2, "tool": "AutoORCA orbital_visualize.py", "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "execution_mode": "executed" if args.execute else "planned", "source": {**sources, "calculation_sha256": calculation_hash, "orca_version": plan["orca_version"], "method_metadata": metadata}, "source_binding": source_binding, "orbitals": records, "cube": {"generator": "orca_plot", "orca_plot_backend_version": ORCA_PLOT_BACKEND_VERSION, "grid": args.grid, "timeout_seconds": args.orca_plot_timeout}, "render": {"renderer": "VMD/Tachyon" if args.renderer == "vmd" else "none", "profile": args.profile, "resolution": list(plan["resolution"]), "isovalue": args.isovalue, "projection": "orthographic", "camera_convention": "PCA-or-explicit-axis-v1", "view_axis_selectors": plan["selectors"], "views": plan["views"], "view_axes": plan["axes"], "camera_matrices": plan["matrices"], "timeout_seconds": args.vmd_timeout, "results": render_results}, "comparison": plan["comparison"], "limitations": ["No ORCA input was modified and no electronic-structure calculation was launched.", "MO images alone do not establish ICT.", "An overall MO phase inversion has no physical significance."]}
+    cube_failed = any(record["cube"]["status"] not in {"GENERATED", "PLANNED"} for record in records)
+    if not args.execute:
+        overall_status = "PLANNED"
+    elif cube_failed:
+        overall_status = "FAILED"
+    elif args.renderer == "none":
+        overall_status = "COMPLETED"
+    elif all(result["status"] == "RENDERED" for result in render_results):
+        overall_status = "COMPLETED"
+    else:
+        overall_status = "PARTIAL"
+    manifest = {"schema_version": 2, "tool": "AutoORCA orbital_visualize.py", "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "execution_mode": "executed" if args.execute else "planned", "overall_status": overall_status, "source": {**sources, "calculation_sha256": calculation_hash, "orca_version": plan["orca_version"], "method_metadata": metadata}, "source_binding": source_binding, "orbitals": records, "cube": {"generator": "orca_plot", "orca_plot_backend_version": ORCA_PLOT_BACKEND_VERSION, "grid": args.grid, "timeout_seconds": args.orca_plot_timeout}, "render": {"renderer": "VMD/Tachyon" if args.renderer == "vmd" else "none", "profile": args.profile, "resolution": list(plan["resolution"]), "isovalue": args.isovalue, "projection": "orthographic", "camera_convention": "PCA-or-explicit-axis-v1", "view_axis_selectors": plan["selectors"], "views": plan["views"], "view_axes": plan["axes"], "camera_matrices": plan["matrices"], "timeout_seconds": args.vmd_timeout, "results": render_results}, "comparison": plan["comparison"], "limitations": ["No ORCA input was modified and no electronic-structure calculation was launched.", "MO images alone do not establish ICT.", "An overall MO phase inversion has no physical significance."]}
     plan["manifest_path"].write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     summary = ["# AutoORCA orbital visualization", "", f"Mode: `{manifest['execution_mode']}`", f"Manifest: `{plan['manifest_path'].name}`", "", "## Orbitals", ""]
     summary += [f"- {record['label']}: ORCA MO {record['index']} ({record['spin']}), {record['energy_ev']} eV; cube {record['cube']['status']}" for record in records]
@@ -486,6 +515,9 @@ def main() -> None:
     except (OSError, json.JSONDecodeError, VisualizationError) as exc:
         print(f"[ORBITAL-VISUALIZATION] ERROR: {exc}", file=sys.stderr); raise SystemExit(2)
     print(f"[ORBITAL-VISUALIZATION] Manifest written: {manifest}")
+    status = json.loads(manifest.read_text(encoding="utf-8"))["overall_status"]
+    if status == "FAILED": raise SystemExit(1)
+    if status == "PARTIAL": raise SystemExit(3)
 
 
 if __name__ == "__main__": main()

@@ -36,6 +36,15 @@ class OrcaCubeBackendTests(unittest.TestCase):
                 with self.assertRaisesRegex(cube.OrcaPlotError, "exceeded 2s"):
                     cube.generate_cube(gbw, 1, 0, Path(temporary) / "out.cube", 100, timeout_seconds=2)
 
+    def test_unchanged_old_cube_is_never_reused_after_success_exit(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            gbw = work / "job.gbw"; gbw.write_bytes(b"placeholder")
+            (work / "job.mo78a.cube").write_text("old cube")
+            with patch.object(cube, "find_orca_plot", return_value="orca_plot"), patch.object(cube.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="success")):
+                with self.assertRaisesRegex(cube.OrcaPlotError, "no new or modified MO cube"):
+                    cube.generate_cube(gbw, 78, 0, work / "out.cube", 100)
+
 
 if __name__ == "__main__":
     unittest.main()

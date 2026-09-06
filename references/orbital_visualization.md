@@ -6,8 +6,8 @@ electronic-structure calculation.
 
 `scripts/orbital_visualize.py` reads the completed output, resolves requested
 frontier orbitals, writes a provenance manifest, and—only with `--execute`—
-asks `orca_plot` to generate cubes. It requires the `.out` and `.gbw` to share
-an exact directory/basename identity and requires the output to report ORCA
+asks `orca_plot` to generate cubes. It requires the `.out`, `.gbw`, and optional
+`.inp` to share an exact directory/basename identity and requires the output to report ORCA
 6.1.x. Each generated cube must then match the supplied XYZ atom count and
 coordinates before rendering. ORCA MO indices start at zero. For RHF/RKS
 the operator is `0`; for UHF/UKS, alpha/beta use `0`/`1`. See the official
@@ -27,4 +27,7 @@ The ORCA and VMD calls have bounded timeouts (600 seconds by default, adjustable
 with `--orca-plot-timeout` and `--vmd-timeout`). The VMD camera is written as a
 nested 4 x 4 Tcl matrix. PCA signs are canonicalized and the basis is made
 right-handed so equivalent geometries do not acquire arbitrary mirror/flip
-orientations.
+orientations. A cube is accepted only if the current `orca_plot` invocation
+created or content-modified it; VMD/PNG artifacts follow the same no-stale-file
+rule. `overall_status` is `PLANNED`, `COMPLETED`, `PARTIAL`, or `FAILED` and
+requested partial/failed rendering returns a nonzero process status.

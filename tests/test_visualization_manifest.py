@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -31,6 +32,7 @@ class VisualizationManifestTests(unittest.TestCase):
         manifest_path = vis.execute(self.args())
         data = json.loads(manifest_path.read_text())
         self.assertEqual(data["execution_mode"], "planned")
+        self.assertEqual(data["overall_status"], "PLANNED")
         self.assertEqual(data["source"]["orca_version"], "6.1.0")
         self.assertEqual(data["source"]["method_metadata"]["functional"], "CAM-B3LYP")
         self.assertEqual([entry["index"] for entry in data["orbitals"]], [1, 2])
@@ -61,6 +63,11 @@ class VisualizationManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(vis.VisualizationError, "ORCA61_REQUIRED"):
             vis.build_plan(self.args())
 
+    def test_input_source_mismatch_is_a_hard_gate(self):
+        other = self.work / "other.inp"; other.write_text("# @FUNCTIONAL: PBE0\n")
+        with self.assertRaisesRegex(vis.VisualizationError, "SOURCE_IDENTITY_MISMATCH"):
+            vis.build_plan(self.args(input=str(other)))
+
     def test_cube_xyz_binding_checks_coordinates(self):
         cube = self.work / "job.mo1a.cube"
         cube.write_text("cube\ncube\n 3 0 0 0\n 2 1 0 0\n 2 0 1 0\n 2 0 0 1\n 6 0 0 0 0\n 6 0 1.889726 0 0\n 6 0 0 1.889726 0\n")
@@ -69,6 +76,14 @@ class VisualizationManifestTests(unittest.TestCase):
         cube.write_text(cube.read_text().replace("1.889726 0 0", "10 0 0"))
         with self.assertRaisesRegex(vis.VisualizationError, "CUBE_XYZ_MISMATCH"):
             vis.verify_cube_xyz(cube, self.work / "job.xyz")
+
+    def test_vmd_cannot_reuse_an_unchanged_old_tga(self):
+        script, tga, png = self.work / "render.tcl", self.work / "old.tga", self.work / "new.png"
+        script.write_text("quit\n"); tga.write_text("old tga")
+        calls = iter([SimpleNamespace(stdout="VMD 1.9", returncode=0), SimpleNamespace(stdout="", returncode=0)])
+        with patch.object(vis.shutil, "which", return_value="vmd"), patch.object(vis.subprocess, "run", side_effect=lambda *args, **kwargs: next(calls)):
+            result = vis.run_vmd(script, tga, png, "vmd", 10)
+        self.assertEqual(result["status"], "VMD_STALE_ARTIFACT")
 
 
 if __name__ == "__main__":

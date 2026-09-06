@@ -7,6 +7,8 @@ external programs, while this module owns the small, version-sensitive bridge.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -30,7 +32,20 @@ def find_orca_plot(explicit: str | None = None) -> str | None:
     if explicit:
         path = Path(explicit).expanduser()
         return str(path) if path.is_file() else None
+    orca_root = os.environ.get("ORCA_ROOT")
+    if orca_root:
+        sibling = Path(orca_root).expanduser() / "orca_plot"
+        if sibling.is_file():
+            return str(sibling)
     return shutil.which("orca_plot")
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _candidate_cubes(directory: Path, stem: str, orbital: int, operator: int) -> list[Path]:
@@ -61,7 +76,7 @@ def generate_cube(
     if not executable:
         raise OrcaPlotError("orca_plot was not found; supply --orca-plot or add it to PATH")
     workdir = gbw.parent
-    before = {item.resolve() for item in workdir.glob("*.cube")}
+    before = {item.resolve(): file_sha256(item) for item in workdir.glob("*.cube")}
     try:
         result = subprocess.run(
             [executable, gbw.name, "-i"], cwd=workdir, input=mo_plot_answers(orbital_index, operator, grid),
@@ -74,10 +89,16 @@ def generate_cube(
     if result.returncode != 0:
         raise OrcaPlotError(f"orca_plot failed ({result.returncode}):\n{result.stdout[-2000:]}")
     candidates = _candidate_cubes(workdir, gbw.stem, orbital_index, operator)
-    new = [item for item in candidates if item.resolve() not in before]
-    source = (new or candidates)
-    if not source:
-        raise OrcaPlotError("orca_plot ended without producing the expected MO cube")
+    changed = [item for item in candidates if item.resolve() not in before or file_sha256(item) != before[item.resolve()]]
+    if not changed:
+        raise OrcaPlotError("orca_plot returned successfully but no new or modified MO cube was produced")
     output_cube.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(source[0]), str(output_cube))
-    return {"command": [executable, gbw.name, "-i"], "timeout_seconds": timeout_seconds, "stdout_tail": result.stdout[-2000:], "cube": str(output_cube)}
+    source = changed[0]
+    # This is a derived target, never a source calculation artifact. Replacing
+    # it only after verifying the source is fresh prevents platform-specific
+    # shutil.move failures and prevents an old visualization cube surviving.
+    if output_cube.exists():
+        output_cube.unlink()
+    shutil.move(str(source), str(output_cube))
+    binary = Path(executable).resolve()
+    return {"command": [executable, gbw.name, "-i"], "timeout_seconds": timeout_seconds, "stdout_tail": result.stdout[-2000:], "cube": str(output_cube), "binary_path": str(binary), "binary_sha256": file_sha256(binary) if binary.is_file() else None, "binary_version": "UNVERIFIED"}
